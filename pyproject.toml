@@ -1,0 +1,43 @@
+[project]
+name = "tailorbird-agent"
+version = "0.1.0"
+description = "自托管编程 agent 服务器(2024 运行时 + dashboard),本地 git 分支提交交付,无 GitHub"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+# 依赖:langchain / langgraph / deepagents 使用 3partylibs 下的源码(editable)
+dependencies = [
+    "fastapi>=0.141.1",
+    "uvicorn[standard]>=0.52.0",
+    "httpx>=0.28.1",
+    "PyJWT>=2.12.1",
+    "cryptography>=50.0.0",
+    "langgraph-sdk>=0.4.2",
+    "langchain-core",
+    "langchain",
+    "langgraph",
+    "langgraph-checkpoint-postgres",
+    "markdownify>=1.2.3",
+    "langchain-anthropic>=1.5.4",
+    "langchain-openai>=1.4.1,<2.0.0",
+    "langgraph-cli[inmem]>=0.4.31",
+    "psycopg[binary]>=3.3",
+    "psycopg-pool>=3.3",
+    "python-dotenv>=1.0",
+    "sse-starlette>=2.0",
+    "deepagents",
+]
+
+[tool.uv.sources]
+# 使用仓库内 3partylibs 的源码安装(langchain / langgraph / deepagents)
+deepagents = { path = "3partylibs/deepagents/libs/deepagents", editable = true }
+langchain-core = { path = "3partylibs/langchain/libs/core", editable = true }
+langchain = { path = "3partylibs/langchain/libs/langchain_v1", editable = true }
+langgraph = { path = "3partylibs/langgraph/libs/langgraph", editable = true }
+langgraph-checkpoint-postgres = { path = "3partylibs/langgraph/libs/checkpoint-postgres", editable = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["agent"]

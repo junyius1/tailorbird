@@ -1,0 +1,36 @@
+{
+  "$schema": "https://langgra.ph/schema.json",
+  "python_version": "3.12",
+  "api_version": "0.12.6",
+  "graphs": {
+    "agent": "agent.graphs.agent:traced_agent",
+    "scheduler": "agent.graphs.scheduler:get_scheduler"
+  },
+  "dependencies": [
+    "."
+  ],
+  "http": {
+    "app": "agent.webapp:app"
+  },
+  "auth": {
+    "path": "agent/local_auth.py:auth",
+    "disable_studio_auth": true
+  },
+  "checkpointer": {
+    "path": "agent/postgres_persistence.py:create_checkpointer",
+    "ttl": {
+      "strategy": "delete",
+      "sweep_interval_minutes": 60,
+      "default_ttl": 43200
+    }
+  },
+  "store": {
+    "path": "agent/postgres_persistence.py:create_store"
+  },
+  "webhooks": {
+    "url": {
+      "disable_loopback": false
+    }
+  },
+  "env": ".env"
+}
