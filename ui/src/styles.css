@@ -1,0 +1,98 @@
+/* Tailorbird UI 全局样式(极简,无 tailwind)。深色主题,本地自托管产品风格。 */
+:root {
+  --bg: #0f1115;
+  --panel: #171a21;
+  --panel-2: #1d212b;
+  --border: #2a2f3a;
+  --text: #e6e9ef;
+  --muted: #8b93a3;
+  --accent: #4f8cff;
+  --accent-2: #2f6fe0;
+  --danger: #e5534b;
+  --ok: #3fb950;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 14px;
+  line-height: 1.55;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+button {
+  font: inherit;
+  cursor: pointer;
+  background: var(--accent);
+  color: #fff;
+  border: 0;
+  border-radius: 8px;
+  padding: 7px 14px;
+}
+button:hover { background: var(--accent-2); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+button.ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
+button.ghost:hover { background: var(--panel-2); }
+input, textarea, select {
+  font: inherit;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  width: 100%;
+}
+input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; }
+.muted { color: var(--muted); }
+.mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12.5px; }
+pre.diff {
+  background: #0b0d10;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  overflow: auto;
+  max-height: 420px;
+  white-space: pre;
+}
+.row { display: flex; gap: 10px; align-items: center; }
+.spacer { flex: 1; }
+.badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+.badge.running { color: var(--accent); border-color: var(--accent); }
+.badge.error { color: var(--danger); border-color: var(--danger); }
+.badge.ok { color: var(--ok); border-color: var(--ok); }
+.thread-item {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+.thread-item:hover { background: var(--panel-2); }
+.thread-item.active { background: var(--panel-2); border-color: var(--border); }
+.layout { display: grid; grid-template-columns: 280px 1fr; height: 100vh; }
+.sidebar { border-right: 1px solid var(--border); background: var(--panel); overflow: auto; }
+.main { overflow: auto; display: flex; flex-direction: column; }
+.transcript { flex: 1; overflow: auto; padding: 20px; }
+.msg { margin: 0 0 16px; padding: 12px 14px; border-radius: 12px; }
+.msg.user { background: var(--panel-2); }
+.msg.ai { background: var(--panel); border: 1px solid var(--border); }
+.msg.system { background: transparent; color: var(--muted); font-size: 12.5px; border: 1px dashed var(--border); }
+.msg .who { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.composer { border-top: 1px solid var(--border); padding: 12px; display: flex; gap: 10px; }
+.composer textarea { min-height: 64px; resize: vertical; }
+.reasoning { margin-top: 10px; border-left: 3px solid var(--accent); background: var(--panel-2); padding: 8px 12px; border-radius: 0 8px 8px 0; }
+.login-wrap { min-height: 100vh; display: grid; place-items: center; }
+.login-card { width: 360px; padding: 28px; }
+.login-card h1 { margin: 0 0 4px; font-size: 20px; }
+.login-card p { margin: 0 0 18px; color: var(--muted); font-size: 13px; }
+.login-card label { display: block; margin: 12px 0 4px; font-size: 13px; color: var(--muted); }
