@@ -1,8 +1,8 @@
 """FastAPI 应用组装(本地自托管变体,无 GitHub/Slack/Linear)。
 
 同一份 app 两种部署形态(见 ``agent.webapp``):
-- 同进程:``langgraph.json`` 的 ``http.app`` 挂进 :2024 运行时;
-- 双进程:``uvicorn agent.webapp:app --port 8001``,浏览器只连 :8001。
+- 同进程:``langgraph.json`` 的 ``http.app`` 挂进运行时(缺省 :2026);
+- 双进程:``uvicorn agent.webapp:app --port 8002``,浏览器只连 :8002,内部以复合 bearer 调运行时。
 
 lifespan(启动校验,fail-closed):
 1. ``pin_single_event_loop()``(单循环铁律,二次);
@@ -21,6 +21,20 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+# .env 优先于进程 env(项目铁律)。
+# 同进程形态下 CLI 已按 langgraph.json 加载 .env,这里重复加载幂等;
+# 双进程形态下 standalone ``uvicorn agent.webapp:app`` 不读 .env,
+# 必须在此显式加载(否则拿不到 token/CORS/webhook secret/LANGGRAPH_URL)。
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".env"),
+        override=True,
+    )
+except Exception:  # dotenv 缺失不阻断启动(下方各 env 读取自行 fail-closed)
+    logging.getLogger(__name__).debug("dotenv 不可用,跳过 .env 加载", exc_info=True)
 
 from ..dashboard.agent_instructions import router as agent_instructions_router
 from ..dashboard.auth import router as auth_router

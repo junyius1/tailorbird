@@ -3,10 +3,10 @@ import { tanstackStart } from "@tanstack/react-start/plugin/vite"
 import viteReact from "@vitejs/plugin-react"
 import { nitro } from "nitro/vite"
 
-// 浏览器只访问 /dashboard/api/**;该前缀反代到运行时(缺省 :2024)。
+// 浏览器只访问 /dashboard/api/**;该前缀反代到 dashboard 服务器(缺省 :8002)。
 // 同 origin 保持 → osw_session cookie 天然可用,UI 不手填 Authorization。
 const API_PREFIX = "/dashboard/api"
-const DASHBOARD_API_URL = process.env.DASHBOARD_API_URL ?? "http://localhost:2024"
+const DASHBOARD_API_URL = process.env.DASHBOARD_API_URL ?? "http://localhost:8002"
 const IS_PRODUCTION = process.env.NODE_ENV === "production"
 
 export default defineConfig({

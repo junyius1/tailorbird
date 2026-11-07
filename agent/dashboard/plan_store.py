@@ -11,7 +11,7 @@ import time
 import uuid
 from typing import Any
 
-from langgraph_sdk import get_client
+from .runtime_client import runtime_store_client as get_client
 
 # store 命名空间:("plans", <thread_id>)
 _NAMESPACE = "plans"

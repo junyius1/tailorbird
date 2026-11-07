@@ -11,7 +11,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from langgraph_sdk import get_client
+from .runtime_client import runtime_store_client as get_client
 
 from .auth import require_admin, require_same_origin_for_mutations, require_session
 
@@ -78,7 +78,7 @@ def _serialize(value: dict[str, Any], name: str) -> dict[str, Any]:
 async def list_skills(user: dict[str, Any] = Depends(require_session)) -> list[dict[str, Any]]:
     """列当前用户技能(按 sub 隔离)。"""
     try:
-        result = await get_client().store.search_items(namespace=_user_ns(user["sub"]), limit=500)
+        result = await get_client().store.search_items(_user_ns(user["sub"]), limit=500)
     except Exception:  # noqa: BLE001
         return []
     items = getattr(result, "items", result) if not isinstance(result, list) else result
@@ -149,7 +149,7 @@ async def delete_skill(name: str, user: dict[str, Any] = Depends(require_session
 async def list_org_skills(user: dict[str, Any] = Depends(require_session)) -> list[dict[str, Any]]:
     """列组织技能(所有登录用户可见)。"""
     try:
-        result = await get_client().store.search_items(namespace=_org_ns(), limit=500)
+        result = await get_client().store.search_items(_org_ns(), limit=500)
     except Exception:  # noqa: BLE001
         return []
     items = getattr(result, "items", result) if not isinstance(result, list) else result

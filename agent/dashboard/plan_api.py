@@ -130,7 +130,7 @@ async def delete_comment(
         # admin 强删:直接删(绕过作者检查)
         from .plan_store import _comments_namespace
 
-        from langgraph_sdk import get_client
+        from .runtime_client import runtime_store_client as get_client
 
         await get_client().store.delete_item(
             _comments_namespace(thread_id), comment_id

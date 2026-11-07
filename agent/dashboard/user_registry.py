@@ -11,7 +11,7 @@
 import os
 from typing import Any
 
-from langgraph_sdk import get_client
+from .runtime_client import runtime_store_client as get_client
 
 # store 命名空间:("local_users", <username>)
 _NAMESPACE = "local_users"
@@ -51,7 +51,7 @@ async def upsert_user_record(record: dict[str, Any]) -> None:
 async def list_user_records() -> list[dict[str, Any]]:
     """列全部用户(admin 页用)。"""
     client = get_client()
-    result = await client.store.search_items(namespace=[_NAMESPACE], limit=500)
+    result = await client.store.search_items([_NAMESPACE], limit=500)
     items = getattr(result, "items", result) if not isinstance(result, list) else result
     records: list[dict[str, Any]] = []
     for item in items or []:

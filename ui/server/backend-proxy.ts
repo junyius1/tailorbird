@@ -4,7 +4,7 @@ import { proxyRequest } from "h3"
 
 // 后端 origin(按请求读取;未配置 → 502)
 function backendOrigin(): string {
-  const configured = (process.env.DASHBOARD_API_URL ?? "http://localhost:2024").replace(/\/$/, "")
+  const configured = (process.env.DASHBOARD_API_URL ?? "http://localhost:8002").replace(/\/$/, "")
   return configured
 }
 

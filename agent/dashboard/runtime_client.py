@@ -1,8 +1,8 @@
-"""dashboard 进程 → 2024 运行时的客户端封装(设计书 §5.1/§18)。
+"""dashboard 进程 → 运行时(:2026)的客户端封装(设计书 §5.1/§18)。
 
 两种部署拓扑共用同一套代理代码:
-- 同进程:dashboard 与运行时都在 :2024,这里经 HTTP loopback 调自己;
-- 双进程:``LANGGRAPH_URL`` 指向 :2024 运行时,浏览器只连 :8001 dashboard。
+- 同进程:dashboard 与运行时同端口,这里经 HTTP loopback 调自己;
+- 双进程:``LANGGRAPH_URL`` 指向运行时(缺省 :2026),浏览器只连 :8002 dashboard。
 
 **身份注入**(§3.1.2 形态 A):所有对运行时的调用统一加
 ``Authorization: Bearer <OPEN_SWE_LOCAL_AUTH_TOKEN>`` +
@@ -10,14 +10,15 @@
 (thread 归属/权限与当前用户一致)。
 """
 
+import logging
 import os
 from typing import Any
 
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
-# 运行时地址(缺省 :2024)
-_DEFAULT_URL = "http://localhost:2024"
+# 运行时地址(缺省 :2026)
+_DEFAULT_URL = "http://localhost:2026"
 
 
 def runtime_url() -> str:
@@ -59,3 +60,17 @@ def langgraph_client(user: str | None = None) -> LangGraphClient:
 def raw_httpx_headers(user: str | None = None) -> dict[str, str]:
     """httpx 代理(SSE/原始 body)用的同一套身份头。"""
     return _auth_headers(user)
+
+
+def runtime_store_client(user: str | None = None) -> LangGraphClient:
+    """store 访问客户端:统一经 HTTP 调运行时(bearer + 身份头)。
+
+    与 ``thread_api`` 的 ``langgraph_client()`` 同模式:
+    - 同进程(:2026)→ HTTP loopback 调自己;
+    - 双进程(:8002)→ HTTP 调 :2026。
+    不用 in-process ``get_client()`` 绑定:standalone dashboard 进程无运行时,
+    其 in-process 绑定在**请求期**才抛错(构造期探测不到),会让
+    user_registry / plans / profiles 等 store 调用静默失败("unknown user")。
+    两种拓扑共享运行时背后的同一 Postgres store,HTTP 访问天然一致。
+    """
+    return langgraph_client(user)

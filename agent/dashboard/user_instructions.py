@@ -8,7 +8,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends
 
-from langgraph_sdk import get_client
+from .runtime_client import runtime_store_client as get_client
 
 from .auth import require_same_origin_for_mutations, require_session
 

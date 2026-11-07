@@ -15,13 +15,13 @@ Vite + TanStack Start(React 19 + Nitro SSR)+ TanStack Router/Query 的本地自�
 
 ```bash
 pnpm install
-pnpm dev            # :3000(vite 代理 /dashboard/api → DASHBOARD_API_URL,缺省 :2024)
+pnpm dev            # :3002(make ui 注入 --port;vite 代理 /dashboard/api → DASHBOARD_API_URL,缺省 :8002)
 ```
 
-运行时不在默认端口时:
+dashboard 服务器不在默认端口时:
 
 ```bash
-DASHBOARD_API_URL=http://localhost:2027 pnpm dev
+DASHBOARD_API_URL=http://localhost:8002 pnpm dev --port 3002
 ```
 
 ## 校验

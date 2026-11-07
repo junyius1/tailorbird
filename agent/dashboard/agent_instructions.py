@@ -10,7 +10,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from langgraph_sdk import get_client
+from .runtime_client import runtime_store_client as get_client
 
 from .auth import require_same_origin_for_mutations, require_session
 
@@ -55,7 +55,7 @@ def _serialize(value: dict[str, Any], full_name: str) -> dict[str, Any]:
 async def list_agent_instructions(user: dict[str, Any] = Depends(require_session)) -> list[dict[str, Any]]:
     """列 per-repo 指令。"""
     try:
-        result = await get_client().store.search_items(namespace=[_NAMESPACE], limit=500)
+        result = await get_client().store.search_items([_NAMESPACE], limit=500)
     except Exception:  # noqa: BLE001
         return []
     items = getattr(result, "items", result) if not isinstance(result, list) else result
