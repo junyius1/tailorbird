@@ -26,7 +26,7 @@ install: bootstrap
 ## 运行时:langgraph dev(:2026,inmem 运行时 + 两张图 + 挂载 dashboard app + 进程内 loopback webhook)
 ## 预置 LANGGRAPH_URL 指向自身端口:同进程 dashboard 代理必须打到同端口(否则 CLI 默认会指向 2024)
 runtime:
-	LANGGRAPH_URL=http://localhost:$(RUNTIME_PORT) LANGGRAPH_PORT=$(RUNTIME_PORT) $(LG) dev --no-reload --port $(RUNTIME_PORT)
+	LANGGRAPH_URL=http://localhost:$(RUNTIME_PORT) LANGGRAPH_PORT=$(RUNTIME_PORT) $(LG) dev --no-reload --no-browser --port $(RUNTIME_PORT)
 
 ## dashboard 服务器:独立 uvicorn 进程(:8002),浏览器只连它;内部以复合 bearer 调运行时
 ## .env 由 app 自行 load_dotenv 加载;LANGGRAPH_URL 指向运行时端口
