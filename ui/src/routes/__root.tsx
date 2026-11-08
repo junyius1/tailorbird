@@ -5,6 +5,7 @@ import {
   Outlet,
   Scripts,
   createRootRouteWithContext,
+  useHydrated,
   useRouter,
   useRouterState,
 } from "@tanstack/react-router"
@@ -50,14 +51,21 @@ export const Route = createRootRouteWithContext<{
 function RootDocument({ children }: { children: React.ReactNode }) {
   const { queryClient } = useRouter().options.context
   const pathname = useRouterState({ select: (s) => s.location.pathname })
-  const warmupScript = apiWarmupScript(pathname)
+  // 内联脚本只在 SSR 首帧(及水合首遍)渲染:它们靠 HTML 解析期执行,
+  // 客户端水合后再由 React 挂 <script> 节点会触发 "Encountered a script tag"
+  // 警告(客户端渲染的 script 永不执行,框架的 HeadContent/Asset 同样按
+  // hydrated 后不渲染处理)。水合完成后把节点从树里移除,SSR 副本早已执行。
+  const hydrated = useHydrated()
+  const warmupScript = hydrated ? null : apiWarmupScript(pathname)
   return (
     <html lang="zh-CN" suppressHydrationWarning>
       <head>
-        <script
-          suppressHydrationWarning={true}
-          dangerouslySetInnerHTML={{ __html: themeInitScript }}
-        />
+        {!hydrated && (
+          <script
+            suppressHydrationWarning={true}
+            dangerouslySetInnerHTML={{ __html: themeInitScript }}
+          />
+        )}
         {warmupScript && (
           <script
             suppressHydrationWarning={true}
