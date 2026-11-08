@@ -6,6 +6,7 @@
 
 import os
 import time
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -24,6 +25,9 @@ router = APIRouter(
     tags=["profile"],
     dependencies=[Depends(require_same_origin_for_mutations)],
 )
+
+# 路径添加仓库的 store 命名空间:(local_repos, <username>)
+_LOCAL_REPOS_NAMESPACE = "local_repos"
 
 # store 命名空间:("profiles",)
 _NAMESPACE = "profiles"
@@ -77,10 +81,71 @@ async def save_profile(
     return profile
 
 
+async def _read_local_repos(sub: str) -> list[dict[str, Any]]:
+    """读用户"按路径添加"的仓库列表(无则空)。"""
+    try:
+        item = await get_client().store.get_item([_LOCAL_REPOS_NAMESPACE], sub)
+    except Exception:  # noqa: BLE001
+        return []
+    value = getattr(item, "value", None) if not isinstance(item, dict) else item.get("value")
+    if not isinstance(value, dict):
+        return []
+    repos = value.get("repos")
+    if not isinstance(repos, list):
+        return []
+    return [entry for entry in repos if isinstance(entry, dict) and str(entry.get("path") or "").strip()]
+
+
+def _normalize_local_path(raw: Any) -> str:
+    """路径入参 → 规范化绝对路径;非法(非绝对)抛 400。"""
+    path = str(raw or "").strip().rstrip("/")
+    if not path:
+        raise HTTPException(status_code=400, detail="path: 必填")
+    if not path.startswith("/"):
+        raise HTTPException(status_code=400, detail="path: 必须是绝对路径")
+    return str(Path(path).expanduser().resolve())
+
+
 @router.get("/repositories")
 async def list_repositories(user: dict[str, Any] = Depends(require_session)):
-    """本地变体:无 GitHub 集成,固定返回当前仓库。"""
-    return {
-        "installations": [],
-        "repositories": [{"full_name": _repo_full_name(), "private": True}],
-    }
+    """本地变体:无 GitHub 集成,返回固定当前仓库 + 用户按路径添加的仓库。
+
+    路径仓库的 ``full_name`` 即宿主绝对路径本身(沙箱挂载直达该路径,
+    见 utils/repo.py 的 normalize_repo_meta)。
+    """
+    repositories = [{"full_name": _repo_full_name(), "private": True}]
+    seen = {repositories[0]["full_name"]}
+    for entry in await _read_local_repos(user["sub"]):
+        full_name = str(entry.get("path") or "").strip().rstrip("/")
+        if full_name and full_name not in seen:
+            seen.add(full_name)
+            repositories.append({"full_name": full_name, "private": True})
+    return {"installations": [], "repositories": repositories}
+
+
+@router.post("/repositories")
+async def add_local_repository(
+    body: dict[str, Any], user: dict[str, Any] = Depends(require_session)
+) -> dict[str, Any]:
+    """按宿主路径添加仓库(下拉框"添加路径")。
+
+    目录必须已存在;重复添加幂等(不重复入库)。
+    """
+    raw = body.get("path") if isinstance(body, dict) else None
+    full_name = _normalize_local_path(raw)
+    host = Path(full_name)
+    if not host.is_dir():
+        raise HTTPException(status_code=400, detail=f"路径不存在或不是目录: {full_name}")
+    entries = await _read_local_repos(user["sub"])
+    if not any(str(entry.get("path")) == full_name for entry in entries):
+        entries.append(
+            {
+                "path": full_name,
+                "name": host.name or "workspace",
+                "added_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            }
+        )
+        await get_client().store.put_item(
+            [_LOCAL_REPOS_NAMESPACE], user["sub"], {"repos": entries}
+        )
+    return {"full_name": full_name, "private": True}

@@ -71,6 +71,32 @@ export function useRepos() {
   })
 }
 
+export function useAddLocalRepo() {
+  const session = useSession()
+  const login = session.data?.login ?? null
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (path: string) => api.addRepository(path),
+    onSuccess: (repo) => {
+      const key = reposQueryKey(login)
+      qc.setQueryData<ReposPayload>(key, (prev) => {
+        const repositories = prev?.repositories ?? []
+        if (
+          repositories.some((entry) => entry.full_name === repo.full_name)
+        ) {
+          return prev ?? { installations: [], repositories: [repo] }
+        }
+        const next: ReposPayload = {
+          ...(prev ?? { installations: [] }),
+          repositories: [...repositories, repo],
+        }
+        if (login) writeCachedRepos(login, next)
+        return next
+      })
+    },
+  })
+}
+
 export function useRefreshRepos() {
   const session = useSession()
   const login = session.data?.login ?? null

@@ -29,7 +29,7 @@ import {
   localThreadKeys,
 } from "@/features/agents/lib/desktopLocal"
 import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
-import { useProfile, useRepos } from "@/lib/profile"
+import { useAddLocalRepo, useProfile, useRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 import {
   requestNotificationPermission,
@@ -109,6 +109,7 @@ export function AgentsHome() {
 
   const reposQuery = useRepos()
   const profileQuery = useProfile()
+  const addLocalRepo = useAddLocalRepo()
   const skills = useAgentSkills({ enabled: cloudEnabled })
   // undefined = untouched (fall back to the profile default); null = explicitly "no repo".
   const [repoOverride, setRepoOverride] = useState<string | null | undefined>(
@@ -118,6 +119,21 @@ export function AgentsHome() {
     repoOverride === undefined
       ? (profileQuery.data?.default_repo ?? null)
       : repoOverride
+  // 下拉框"Add path…":按宿主路径添加仓库,成功后自动选中
+  const handleAddPath = useCallback(
+    async (path: string): Promise<string | null> => {
+      try {
+        const repo = await addLocalRepo.mutateAsync(path)
+        setRepoOverride(repo.full_name)
+        return null
+      } catch (error) {
+        return error instanceof Error
+          ? error.message
+          : "Failed to add path"
+      }
+    },
+    [addLocalRepo]
+  )
 
   // Holds the just-submitted prompt until the SDK mints the thread id; the
   // effect then seeds the optimistic summary and navigates exactly once.
@@ -328,6 +344,7 @@ export function AgentsHome() {
             repos={reposQuery.data?.repositories}
             selectedRepo={repo}
             onRepoChange={setRepoOverride}
+            onAddPath={handleAddPath}
             runTarget={isDesktop ? runTarget : undefined}
             onRunTargetChange={
               isDesktop && cloudEnabled ? handleRunTargetChange : undefined

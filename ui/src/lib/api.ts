@@ -231,6 +231,12 @@ export const api = {
       body: JSON.stringify(body),
     }),
   repos: () => request<ReposPayload>("/repositories"),
+  // 按宿主路径添加仓库(本地变体;full_name 即路径本身)
+  addRepository: (path: string) =>
+    request<Repository>("/repositories", {
+      method: "POST",
+      body: JSON.stringify({ path }),
+    }),
   logout: () => request<{ ok: boolean }>("/auth/logout", { method: "POST" }),
   slackConnectUrl: () => "/dashboard/api/auth/slack/connect",
 

@@ -177,8 +177,9 @@ def _read_host_git_identity() -> tuple[str | None, str | None]:
 def _repo_mount_point(repo: dict | None) -> tuple[str, str | None]:
     """解析仓库 → (容器内挂载点, 宿主绝对路径)。
 
-    本变体仓库是**本地路径**概念:``repo = {"name": ..., "owner"?: ...}``。
-    宿主路径解析规则(与 utils/repo.py 的 resolve_local_repo 一致):
+    本变体仓库是**本地路径**概念:``repo = {"name": ..., "owner"?: ...,
+    "local_path"?: ...}``。宿主路径解析规则(与 utils/repo.py 一致):
+    - ``local_path``(UI 按路径添加的仓库)→ 直达该宿主路径;
     - REPO_LOCAL_PATHS 环境变量(owner/name 或 name → 宿主绝对路径)显式映射;
     - 否则 ``/workspace/<repo>`` 下自动建目录(git init 由 agent 完成)。
     无仓库时回退 ``/workspace``(宿主 ``LOCAL_SANDBOX_ROOT_DIR/workspace``)。
@@ -190,6 +191,12 @@ def _repo_mount_point(repo: dict | None) -> tuple[str, str | None]:
         root = Path(os.environ.get("LOCAL_SANDBOX_ROOT_DIR", "/tmp/tailorbird-sandboxes"))
         host = root / "workspace"
         return _WORKSPACE_ROOT, str(host)
+    # 路径添加的仓库:local_path 直达宿主路径(优先级高于 env 映射)
+    local_path = str((repo or {}).get("local_path") or "").strip()
+    if local_path:
+        return f"{_WORKSPACE_ROOT}/{name}", str(
+            Path(local_path).expanduser().resolve()
+        )
     # 显式映射表:owner/name 或 name → 宿主路径
     mapping_raw = os.environ.get("REPO_LOCAL_PATHS", "")
     owner = str((repo or {}).get("owner") or "").strip()

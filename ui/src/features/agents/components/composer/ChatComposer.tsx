@@ -103,6 +103,8 @@ export interface ChatComposerProps {
   repos?: Array<{ full_name: string }>
   selectedRepo?: string | null
   onRepoChange?: (repo: string | null) => void
+  /** 提供后仓库下拉出现"Add path…"入口;返回错误文案或 null(成功)。 */
+  onAddPath?: (path: string) => Promise<string | null>
   /** Desktop-only execution target. Omit this prop to keep the control out of the web UI. */
   runTarget?: RunTarget
   onRunTargetChange?: (next: RunTarget) => void
@@ -227,6 +229,7 @@ export const ChatComposer = memo(function ChatComposer({
   repos,
   selectedRepo = null,
   onRepoChange,
+  onAddPath,
   runTarget,
   onRunTargetChange,
   localProjects = [],
@@ -671,6 +674,7 @@ export const ChatComposer = memo(function ChatComposer({
               repos={repos}
               selectedRepo={selectedRepo}
               onRepoChange={onRepoChange}
+              onAddPath={onAddPath}
             />
           )}
           {runTarget !== "local" && onEnvironmentChange && (

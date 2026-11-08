@@ -702,7 +702,9 @@ export function optimisticThread(
   return {
     id: threadId,
     title: text.slice(0, 80) || "New agent",
-    repo: repoFullName.split("/")[1] ?? "",
+    repo: repoFullName.startsWith("/")
+      ? (repoFullName.split("/").filter(Boolean).at(-1) ?? "")
+      : (repoFullName.split("/")[1] ?? ""),
     repoFullName,
     branch: "main",
     model: vars.model_id ?? "Default",
