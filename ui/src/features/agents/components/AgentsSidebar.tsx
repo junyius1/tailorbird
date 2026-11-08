@@ -282,8 +282,8 @@ export function AgentsSidebar({
           to={localOnly ? "/agents" : "/my-settings"}
           className="flex items-center gap-2 font-heading text-sm font-medium tracking-tight text-foreground"
         >
-          <img src="/logo-mark.png" alt="" className="size-5" />
-          Open SWE
+          <img src="/logo-mark.png" alt="" className="size-10" />
+          Tailorbird
         </Link>
         <div className="flex items-center gap-1">
           <button
