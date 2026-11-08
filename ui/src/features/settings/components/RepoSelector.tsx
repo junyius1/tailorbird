@@ -4,10 +4,12 @@ import {
   CaretDownIcon,
   FolderIcon,
   FolderPlusIcon,
-  TrashIcon,
   XIcon,
 } from "@phosphor-icons/react"
 
+import { Dialog } from "@base-ui/react/dialog"
+
+import { Button } from "@/components/ui/button"
 import {
   Tooltip,
   TooltipPopup,
@@ -58,6 +60,8 @@ export function RepoSelector({
   const [adding, setAdding] = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
+  // 待确认删除的列表项(点 x 后弹确认框)
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const addInputRef = useRef<HTMLInputElement>(null)
   const refresh = useRefreshRepos()
@@ -91,6 +95,22 @@ export function RepoSelector({
     setQuery("")
     setAddOpen(false)
     setAddError(null)
+  }
+
+  async function confirmDelete() {
+    const fullName = pendingDelete
+    if (!fullName || !onDeletePath || deleting) return
+    setDeleting(fullName)
+    setAddError(null)
+    const error = await onDeletePath(fullName).catch((err: unknown) =>
+      err instanceof Error ? err.message : "Failed to remove"
+    )
+    setDeleting(null)
+    if (error) {
+      setAddError(error)
+      return
+    }
+    setPendingDelete(null)
   }
 
   async function handleAddPath(e: React.FormEvent) {
@@ -205,7 +225,7 @@ export function RepoSelector({
                       className="flex min-w-0 flex-1 cursor-pointer items-center px-2 py-1.5 text-left"
                     >
                       <span className="truncate">{repo.full_name}</span>
-                      {selected && (
+                      {selected && !canDelete && (
                         <span className="ml-auto pl-3 text-muted-foreground">
                           ✓
                         </span>
@@ -217,21 +237,17 @@ export function RepoSelector({
                         title="Remove from list"
                         aria-label={`Remove ${repo.full_name}`}
                         disabled={deleting === repo.full_name}
-                        onClick={async (e) => {
+                        onClick={(e) => {
                           e.stopPropagation()
-                          setDeleting(repo.full_name)
-                          const error = await onDeletePath!(repo.full_name).catch(
-                            (err: unknown) =>
-                              err instanceof Error
-                                ? err.message
-                                : "Failed to remove"
-                          )
-                          setDeleting(null)
-                          if (error) setAddError(error)
+                          setPendingDelete(repo.full_name)
                         }}
-                        className="mr-1 flex size-5 cursor-pointer items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100 disabled:cursor-default disabled:opacity-40"
+                        className="mr-0.5 flex size-5 shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:cursor-default disabled:opacity-40"
                       >
-                        <TrashIcon className="size-3.5" />
+                        {deleting === repo.full_name ? (
+                          <span className="size-2 animate-spin rounded-full border border-current border-t-transparent" />
+                        ) : (
+                          <XIcon className="size-3.5" />
+                        )}
                       </button>
                     )}
                   </div>
@@ -311,6 +327,46 @@ export function RepoSelector({
           )}
         </div>
       )}
+      <Dialog.Root
+        open={pendingDelete !== null}
+        onOpenChange={(next) => {
+          if (!next && !deleting) setPendingDelete(null)
+        }}
+      >
+        <Dialog.Portal>
+          <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/50 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
+          <Dialog.Popup className="fixed top-1/2 left-1/2 z-50 w-[min(24rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg bg-popover p-5 text-popover-foreground shadow-md ring-1 ring-foreground/10 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
+            <div className="flex flex-col gap-4">
+              <Dialog.Title className="text-sm font-medium">
+                Remove repository
+              </Dialog.Title>
+              <Dialog.Description className="break-all font-mono text-xs text-muted-foreground">
+                确定删除列表项
+                {pendingDelete ? ` ${pendingDelete}` : ""} ?
+                该目录本身不会被改动,只是从可选仓库里移除。
+              </Dialog.Description>
+              <div className="flex justify-end gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={deleting !== null}
+                  onClick={() => setPendingDelete(null)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  disabled={deleting !== null}
+                  onClick={() => void confirmDelete()}
+                >
+                  {deleting === pendingDelete ? "Removing…" : "Remove"}
+                </Button>
+              </div>
+            </div>
+          </Dialog.Popup>
+        </Dialog.Portal>
+      </Dialog.Root>
     </div>
   )
 }
