@@ -1,5 +1,11 @@
 {
-  "include": ["**/*.ts", "**/*.tsx"],
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    "vite.config.ts",
+    "server/**/*.ts"
+  ],
+  "exclude": ["node_modules", "dist", ".output"],
   "compilerOptions": {
     "target": "ES2022",
     "jsx": "react-jsx",
@@ -15,6 +21,7 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noUncheckedIndexedAccess": true,
+    "noUncheckedSideEffectImports": true,
     "noFallthroughCasesInSwitch": true,
     "allowJs": true,
     "paths": {
