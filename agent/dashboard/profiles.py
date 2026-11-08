@@ -29,6 +29,8 @@ router = APIRouter(
 
 # 路径添加仓库的 store 命名空间:(local_repos, <username>)
 _LOCAL_REPOS_NAMESPACE = "local_repos"
+# 已删除(隐藏)仓库的 store 命名空间:(hidden_repos, <username>)
+_HIDDEN_REPOS_NAMESPACE = "hidden_repos"
 
 # store 命名空间:("profiles",)
 _NAMESPACE = "profiles"
@@ -97,6 +99,28 @@ async def _read_local_repos(sub: str) -> list[dict[str, Any]]:
     return [entry for entry in repos if isinstance(entry, dict) and str(entry.get("path") or "").strip()]
 
 
+async def _read_hidden_repos(sub: str) -> set[str]:
+    """读用户已删除(隐藏)的仓库 full_name 集合(无则空)。"""
+    try:
+        item = await get_client().store.get_item([_HIDDEN_REPOS_NAMESPACE], sub)
+    except Exception:
+        return set()
+    value = getattr(item, "value", None) if not isinstance(item, dict) else item.get("value")
+    if not isinstance(value, dict):
+        return set()
+    repos = value.get("repos")
+    if not isinstance(repos, list):
+        return set()
+    return {str(r) for r in repos if isinstance(r, (str, int))}
+
+
+async def _write_hidden_repos(sub: str, hidden: set[str]) -> None:
+    """写用户已删除(隐藏)的仓库集合。"""
+    await get_client().store.put_item(
+        [_HIDDEN_REPOS_NAMESPACE], sub, {"repos": sorted(hidden)}
+    )
+
+
 def _normalize_local_path(raw: Any) -> str:
     """路径入参 → 规范化绝对路径;非法(非绝对)抛 400。"""
     path = str(raw or "").strip().rstrip("/")
@@ -124,7 +148,10 @@ async def list_repositories(user: dict[str, Any] = Depends(require_session)):
             ),
         }
     ]
-    seen = {repositories[0]["full_name"]}
+    hidden = await _read_hidden_repos(user["sub"])
+    if repositories[0]["full_name"] in hidden:
+        repositories = []
+    seen = {r["full_name"] for r in repositories}
     for entry in await _read_local_repos(user["sub"]):
         full_name = str(entry.get("path") or "").strip().rstrip("/")
         if full_name and full_name not in seen:
@@ -173,19 +200,28 @@ async def add_local_repository(
 async def remove_local_repository(
     body: dict[str, Any], user: dict[str, Any] = Depends(require_session)
 ) -> dict[str, bool]:
-    """删除按路径添加的仓库(下拉框列表项的垃圾桶)。
+    """删除下拉框列表项(垃圾桶)。
 
-    只接受路径仓库(``full_name`` 以 ``/`` 开头);固定默认仓库不可删。
+    路径仓库(``full_name`` 以 ``/`` 开头)→ 从已添加列表移除;
+    默认仓库(当前 env 仓库)→ 记入隐藏集合(按用户),列表不再出现。
     """
     raw = body.get("full_name") if isinstance(body, dict) else None
     full_name = str(raw or "").strip().rstrip("/")
-    if not full_name.startswith("/"):
-        raise HTTPException(status_code=400, detail="仅路径添加的仓库可以删除")
-    entries = await _read_local_repos(user["sub"])
-    if not any(str(entry.get("path")) == full_name for entry in entries):
-        raise HTTPException(status_code=404, detail="该仓库不在已添加列表里")
-    entries = [entry for entry in entries if str(entry.get("path")) != full_name]
-    await get_client().store.put_item(
-        [_LOCAL_REPOS_NAMESPACE], user["sub"], {"repos": entries}
-    )
-    return {"ok": True}
+    if not full_name:
+        raise HTTPException(status_code=400, detail="full_name: 必填")
+    if full_name.startswith("/"):
+        entries = await _read_local_repos(user["sub"])
+        if not any(str(entry.get("path")) == full_name for entry in entries):
+            raise HTTPException(status_code=404, detail="该仓库不在已添加列表里")
+        entries = [entry for entry in entries if str(entry.get("path")) != full_name]
+        await get_client().store.put_item(
+            [_LOCAL_REPOS_NAMESPACE], user["sub"], {"repos": entries}
+        )
+        return {"ok": True}
+    # 默认仓库 → 隐藏
+    if full_name == _repo_full_name():
+        hidden = await _read_hidden_repos(user["sub"])
+        hidden.add(full_name)
+        await _write_hidden_repos(user["sub"], hidden)
+        return {"ok": True}
+    raise HTTPException(status_code=400, detail="仅路径仓库或默认仓库可以删除")

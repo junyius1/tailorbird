@@ -30,7 +30,7 @@ interface RepoSelectorProps {
   noMatchesLabel?: string
   /** 提供后在下拉框底部出现"添加路径"入口(full_name 即宿主绝对路径) */
   onAddPath?: (path: string) => Promise<string | null>
-  /** 提供后路径仓库行出现删除按钮;返回错误文案或 null(成功) */
+  /** 提供后列表行出现删除按钮;返回错误文案或 null(成功) */
   onDeletePath?: (fullName: string) => Promise<string | null>
   className?: string
   triggerClassName?: string
@@ -111,6 +111,8 @@ export function RepoSelector({
       return
     }
     setPendingDelete(null)
+    // 删的是当前选中项 → 回退到"未选择"
+    if (fullName === selectedRepo) onRepoChange(null)
   }
 
   async function handleAddPath(e: React.FormEvent) {
@@ -207,30 +209,14 @@ export function RepoSelector({
                   (repo.full_name.startsWith("/")
                     ? repo.full_name
                     : repo.full_name)
-                const isPathRepo = repo.full_name.startsWith("/")
-                const canDelete = isPathRepo && Boolean(onDeletePath)
+                const canDelete = Boolean(onDeletePath)
                 const row = (
                   <div
                     className={cn(
-                      "group flex w-full items-center pr-1 transition-colors hover:bg-muted",
+                      "group flex w-full items-center pl-1 pr-1 transition-colors hover:bg-muted",
                       selected ? "text-foreground" : "text-muted-foreground"
                     )}
                   >
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onRepoChange(repo.full_name)
-                        close()
-                      }}
-                      className="flex min-w-0 flex-1 cursor-pointer items-center px-2 py-1.5 text-left"
-                    >
-                      <span className="truncate">{repo.full_name}</span>
-                      {selected && !canDelete && (
-                        <span className="ml-auto pl-3 text-muted-foreground">
-                          ✓
-                        </span>
-                      )}
-                    </button>
                     {canDelete && (
                       <button
                         type="button"
@@ -241,7 +227,7 @@ export function RepoSelector({
                           e.stopPropagation()
                           setPendingDelete(repo.full_name)
                         }}
-                        className="mr-0.5 flex size-5 shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:cursor-default disabled:opacity-40"
+                        className="ml-0.5 flex size-5 shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:cursor-default disabled:opacity-40"
                       >
                         {deleting === repo.full_name ? (
                           <span className="size-2 animate-spin rounded-full border border-current border-t-transparent" />
@@ -250,6 +236,21 @@ export function RepoSelector({
                         )}
                       </button>
                     )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onRepoChange(repo.full_name)
+                        close()
+                      }}
+                      className="flex min-w-0 flex-1 cursor-pointer items-center px-2 py-1.5 text-left"
+                    >
+                      <span className="truncate">{repo.full_name}</span>
+                      {selected && (
+                        <span className="ml-auto pl-3 text-muted-foreground">
+                          ✓
+                        </span>
+                      )}
+                    </button>
                   </div>
                 )
                 return (
