@@ -4,6 +4,7 @@
 的 profile 半,优先级高于 env 部署默认)。
 """
 
+import os
 import time
 from typing import Any
 
@@ -12,6 +13,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from .runtime_client import runtime_store_client as get_client
 
 from .auth import require_same_origin_for_mutations, require_session
+
+def _repo_full_name() -> str:
+    """当前仓库 full_name(本地变体单仓,env 可覆盖)。"""
+    return os.environ.get("TAILORBIRD_REPO_FULL_NAME", "junyius1/tailorbird")
+
 
 router = APIRouter(
     prefix="/dashboard/api",
@@ -69,3 +75,12 @@ async def save_profile(
     await get_client().store.put_item([_NAMESPACE], user["sub"], profile)
     profile.setdefault("login", user["sub"])
     return profile
+
+
+@router.get("/repositories")
+async def list_repositories(user: dict[str, Any] = Depends(require_session)):
+    """本地变体:无 GitHub 集成,固定返回当前仓库。"""
+    return {
+        "installations": [],
+        "repositories": [{"full_name": _repo_full_name(), "private": True}],
+    }
