@@ -911,10 +911,11 @@ export const ChatComposer = memo(function ChatComposer({
               usedTokens={contextUsage?.usedTokens}
             />
 
-            {typeof navigator !== "undefined" &&
-              "mediaDevices" in navigator &&
-              typeof MediaRecorder !== "undefined" && (
-                <Tooltip>
+            {/* 不用 navigator.mediaDevices 特性探测做渲染开关:Node ≥21 有
+                全局 navigator(无 mediaDevices)→ 服务端不渲染、客户端渲染
+                → 水合不匹配。恒渲染,不支持时点击由 handleDictation 报错
+                提示(本地变体 transcribeAudio 本就 501)。 */}
+            <Tooltip>
                   <TooltipTrigger
                     render={
                       <ComposerControl
@@ -948,7 +949,6 @@ export const ChatComposer = memo(function ChatComposer({
                       : "Dictate message"}
                   </TooltipPopup>
                 </Tooltip>
-              )}
           </div>
 
           <ComposerPrimaryActions
