@@ -105,6 +105,8 @@ export interface ChatComposerProps {
   onRepoChange?: (repo: string | null) => void
   /** 提供后仓库下拉出现"Add path…"入口;返回错误文案或 null(成功)。 */
   onAddPath?: (path: string) => Promise<string | null>
+  /** 提供后路径仓库行出现删除按钮;返回错误文案或 null(成功)。 */
+  onDeletePath?: (fullName: string) => Promise<string | null>
   /** Desktop-only execution target. Omit this prop to keep the control out of the web UI. */
   runTarget?: RunTarget
   onRunTargetChange?: (next: RunTarget) => void
@@ -230,6 +232,7 @@ export const ChatComposer = memo(function ChatComposer({
   selectedRepo = null,
   onRepoChange,
   onAddPath,
+  onDeletePath,
   runTarget,
   onRunTargetChange,
   localProjects = [],
@@ -675,6 +678,7 @@ export const ChatComposer = memo(function ChatComposer({
               selectedRepo={selectedRepo}
               onRepoChange={onRepoChange}
               onAddPath={onAddPath}
+              onDeletePath={onDeletePath}
             />
           )}
           {runTarget !== "local" && onEnvironmentChange && (

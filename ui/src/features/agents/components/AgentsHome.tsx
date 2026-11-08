@@ -29,7 +29,12 @@ import {
   localThreadKeys,
 } from "@/features/agents/lib/desktopLocal"
 import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
-import { useAddLocalRepo, useProfile, useRepos } from "@/lib/profile"
+import {
+  useAddLocalRepo,
+  useProfile,
+  useRemoveLocalRepo,
+  useRepos,
+} from "@/lib/profile"
 import { useSession } from "@/lib/session"
 import {
   requestNotificationPermission,
@@ -110,6 +115,7 @@ export function AgentsHome() {
   const reposQuery = useRepos()
   const profileQuery = useProfile()
   const addLocalRepo = useAddLocalRepo()
+  const removeLocalRepo = useRemoveLocalRepo()
   const skills = useAgentSkills({ enabled: cloudEnabled })
   // undefined = untouched (fall back to the profile default); null = explicitly "no repo".
   const [repoOverride, setRepoOverride] = useState<string | null | undefined>(
@@ -133,6 +139,21 @@ export function AgentsHome() {
       }
     },
     [addLocalRepo]
+  )
+  // 删除已添加的路径仓库;若当前选中项被删则清空选择
+  const handleDeletePath = useCallback(
+    async (fullName: string): Promise<string | null> => {
+      try {
+        await removeLocalRepo.mutateAsync(fullName)
+        setRepoOverride((prev) => (prev === fullName ? null : prev))
+        return null
+      } catch (error) {
+        return error instanceof Error
+          ? error.message
+          : "Failed to remove path"
+      }
+    },
+    [removeLocalRepo]
   )
 
   // Holds the just-submitted prompt until the SDK mints the thread id; the
@@ -345,6 +366,7 @@ export function AgentsHome() {
             selectedRepo={repo}
             onRepoChange={setRepoOverride}
             onAddPath={handleAddPath}
+            onDeletePath={handleDeletePath}
             runTarget={isDesktop ? runTarget : undefined}
             onRunTargetChange={
               isDesktop && cloudEnabled ? handleRunTargetChange : undefined

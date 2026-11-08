@@ -167,3 +167,25 @@ async def add_local_repository(
             [_LOCAL_REPOS_NAMESPACE], user["sub"], {"repos": entries}
         )
     return {"full_name": full_name, "private": True}
+
+
+@router.delete("/repositories")
+async def remove_local_repository(
+    body: dict[str, Any], user: dict[str, Any] = Depends(require_session)
+) -> dict[str, bool]:
+    """删除按路径添加的仓库(下拉框列表项的垃圾桶)。
+
+    只接受路径仓库(``full_name`` 以 ``/`` 开头);固定默认仓库不可删。
+    """
+    raw = body.get("full_name") if isinstance(body, dict) else None
+    full_name = str(raw or "").strip().rstrip("/")
+    if not full_name.startswith("/"):
+        raise HTTPException(status_code=400, detail="仅路径添加的仓库可以删除")
+    entries = await _read_local_repos(user["sub"])
+    if not any(str(entry.get("path")) == full_name for entry in entries):
+        raise HTTPException(status_code=404, detail="该仓库不在已添加列表里")
+    entries = [entry for entry in entries if str(entry.get("path")) != full_name]
+    await get_client().store.put_item(
+        [_LOCAL_REPOS_NAMESPACE], user["sub"], {"repos": entries}
+    )
+    return {"ok": True}

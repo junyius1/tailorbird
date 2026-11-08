@@ -4,6 +4,7 @@ import {
   CaretDownIcon,
   FolderIcon,
   FolderPlusIcon,
+  TrashIcon,
   XIcon,
 } from "@phosphor-icons/react"
 
@@ -27,6 +28,8 @@ interface RepoSelectorProps {
   noMatchesLabel?: string
   /** 提供后在下拉框底部出现"添加路径"入口(full_name 即宿主绝对路径) */
   onAddPath?: (path: string) => Promise<string | null>
+  /** 提供后路径仓库行出现删除按钮;返回错误文案或 null(成功) */
+  onDeletePath?: (fullName: string) => Promise<string | null>
   className?: string
   triggerClassName?: string
   dropdownClassName?: string
@@ -42,6 +45,7 @@ export function RepoSelector({
   searchPlaceholder = "Search repositories…",
   noMatchesLabel = "No matches",
   onAddPath,
+  onDeletePath,
   className,
   triggerClassName,
   dropdownClassName,
@@ -53,6 +57,7 @@ export function RepoSelector({
   const [pathInput, setPathInput] = useState("")
   const [adding, setAdding] = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState<string | null>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const addInputRef = useRef<HTMLInputElement>(null)
   const refresh = useRefreshRepos()
@@ -182,29 +187,58 @@ export function RepoSelector({
                   (repo.full_name.startsWith("/")
                     ? repo.full_name
                     : repo.full_name)
-                const button = (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onRepoChange(repo.full_name)
-                      close()
-                    }}
+                const isPathRepo = repo.full_name.startsWith("/")
+                const canDelete = isPathRepo && Boolean(onDeletePath)
+                const row = (
+                  <div
                     className={cn(
-                      "flex w-full items-center px-2 py-1.5 text-left transition-colors hover:bg-muted",
+                      "group flex w-full items-center pr-1 transition-colors hover:bg-muted",
                       selected ? "text-foreground" : "text-muted-foreground"
                     )}
                   >
-                    <span className="truncate">{repo.full_name}</span>
-                    {selected && (
-                      <span className="ml-auto pl-3 text-muted-foreground">
-                        ✓
-                      </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onRepoChange(repo.full_name)
+                        close()
+                      }}
+                      className="flex min-w-0 flex-1 cursor-pointer items-center px-2 py-1.5 text-left"
+                    >
+                      <span className="truncate">{repo.full_name}</span>
+                      {selected && (
+                        <span className="ml-auto pl-3 text-muted-foreground">
+                          ✓
+                        </span>
+                      )}
+                    </button>
+                    {canDelete && (
+                      <button
+                        type="button"
+                        title="Remove from list"
+                        aria-label={`Remove ${repo.full_name}`}
+                        disabled={deleting === repo.full_name}
+                        onClick={async (e) => {
+                          e.stopPropagation()
+                          setDeleting(repo.full_name)
+                          const error = await onDeletePath!(repo.full_name).catch(
+                            (err: unknown) =>
+                              err instanceof Error
+                                ? err.message
+                                : "Failed to remove"
+                          )
+                          setDeleting(null)
+                          if (error) setAddError(error)
+                        }}
+                        className="mr-1 flex size-5 cursor-pointer items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100 disabled:cursor-default disabled:opacity-40"
+                      >
+                        <TrashIcon className="size-3.5" />
+                      </button>
                     )}
-                  </button>
+                  </div>
                 )
                 return (
                   <Tooltip key={repo.full_name}>
-                    <TooltipTrigger render={button} />
+                    <TooltipTrigger render={row} />
                     <TooltipPopup
                       side="right"
                       align="start"

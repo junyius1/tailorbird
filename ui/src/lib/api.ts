@@ -239,6 +239,12 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ path }),
     }),
+  // 删除按路径添加的仓库
+  removeRepository: (fullName: string) =>
+    request<{ ok: boolean }>("/repositories", {
+      method: "DELETE",
+      body: JSON.stringify({ full_name: fullName }),
+    }),
   logout: () => request<{ ok: boolean }>("/auth/logout", { method: "POST" }),
   slackConnectUrl: () => "/dashboard/api/auth/slack/connect",
 

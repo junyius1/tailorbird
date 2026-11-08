@@ -97,6 +97,29 @@ export function useAddLocalRepo() {
   })
 }
 
+export function useRemoveLocalRepo() {
+  const session = useSession()
+  const login = session.data?.login ?? null
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (fullName: string) => api.removeRepository(fullName),
+    onSuccess: (_res, fullName) => {
+      const key = reposQueryKey(login)
+      qc.setQueryData<ReposPayload>(key, (prev) => {
+        const repositories = prev?.repositories ?? []
+        const next: ReposPayload = {
+          ...(prev ?? { installations: [] }),
+          repositories: repositories.filter(
+            (entry) => entry.full_name !== fullName
+          ),
+        }
+        if (login) writeCachedRepos(login, next)
+        return next
+      })
+    },
+  })
+}
+
 export function useRefreshRepos() {
   const session = useSession()
   const login = session.data?.login ?? null
