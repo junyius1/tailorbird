@@ -1,4 +1,4 @@
-// 会话层:本地 token 登录 → osw_session cookie → api.me()。
+// 会话层:本地 token 登录 → tb_session cookie → api.me()。
 // 未登录(api.me 401)→ 返回 null,登录门据此跳 /login。
 import { queryOptions, useQuery } from "@tanstack/react-query"
 
@@ -23,7 +23,7 @@ export function useSession() {
   return useQuery(sessionQueryOptions)
 }
 
-/** 本地登录:username + 共享 token → 写 osw_session cookie。 */
+/** 本地登录:username + 共享 token → 写 tb_session cookie。 */
 export function login(username: string, token: string) {
   return fetch("/dashboard/api/auth/login", {
     method: "POST",

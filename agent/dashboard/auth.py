@@ -5,7 +5,9 @@
 - ``POST /auth/login {username, token}``:token 与共享 token 经
   ``hmac.compare_digest`` 比对(防时序,不区分"缺/错"防探测);
   注册表开启且用户不存在 → 401 ``unknown user``;
-  成功 → 200 + ``Set-Cookie: osw_session=<按用户签名的会话值>``。
+  成功 → 200 + ``Set-Cookie: tb_session=<按用户签名的会话值>``。
+  (cookie 名独立于 open-swe 的 ``osw_session``:同域名不同端口的两个
+  dashboard 各持各的会话,互不影响。)
 - 会话 cookie 值**按用户签名**(含 sub)——两个浏览器各拿各的 cookie,
   服务端互不串号;**不用进程内存存会话**(双进程部署不共享内存,
   签名 cookie 天然跨进程,只要两进程共享 ``DASHBOARD_JWT_SECRET``)。
@@ -27,8 +29,8 @@ from .user_registry import count_users, list_user_records, registry_enabled, ups
 
 logger = logging.getLogger(__name__)
 
-# 会话 cookie 名
-_COOKIE_NAME = "osw_session"
+# 会话 cookie 名(独立于 open-swe 的 osw_session,避免同域跨端会话互踢)
+_COOKIE_NAME = "tb_session"
 # 会话有效期(秒):7 天
 _SESSION_TTL_SECONDS = 7 * 24 * 3600
 # username 允许字符(1-64 位)

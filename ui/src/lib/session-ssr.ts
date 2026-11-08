@@ -28,7 +28,7 @@ export const resolveSessionOnServer = createIsomorphicFn()
     // redirect — that would leave the build without a shell to write.
     if (process.env.TSS_PRERENDERING === "true") return
 
-    // A cross-origin deployment's `osw_session` belongs to the API's origin, so
+    // A cross-origin deployment's `tb_session` belongs to the API's origin, so
     // this request cannot carry it and `/me` would 401 for a signed-in user —
     // redirecting them to a login page that bounces them straight back. Auth
     // resolution stays client-side there.

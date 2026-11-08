@@ -1,6 +1,6 @@
 // Dashboard API 客户端(本地自托管变体)。
 //
-// 所有请求经同 origin 的 /dashboard/api 代理(credentials 带 osw_session
+// 所有请求经同 origin 的 /dashboard/api 代理(credentials 带 tb_session
 // cookie),浏览器不接触任何 token。后端:tailorbird dashboard(:8002)。
 import { dashboardApiUrl } from "./dashboard-fetch"
 

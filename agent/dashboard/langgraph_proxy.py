@@ -2,7 +2,7 @@
 
 open-swe 的 ``@langchain/react`` StreamProvider 以标准 LangGraph 协议
 (``POST /threads/{id}/runs/stream`` 等)驱动运行时。浏览器只能带
-``osw_session`` cookie,身份与元数据由本代理在服务端补全:
+``tb_session`` cookie,身份与元数据由本代理在服务端补全:
 
 - 鉴权:cookie 会话 → 运行时身份头(形态 A);共享 token 永不进浏览器;
 - 归属:run 创建时强制 ``metadata.local_user = sub``、``source``、

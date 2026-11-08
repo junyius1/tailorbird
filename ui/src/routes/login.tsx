@@ -1,4 +1,4 @@
-// 登录页:本地 token 登录(username + 共享 token)→ osw_session cookie。
+// 登录页:本地 token 登录(username + 共享 token)→ tb_session cookie。
 import { createFileRoute } from "@tanstack/react-router"
 import { useEffect, useMemo } from "react"
 import { useState } from "react"
