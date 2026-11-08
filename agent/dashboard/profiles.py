@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from .runtime_client import runtime_store_client as get_client
 
+from ..utils.repo import normalize_repo_meta, resolve_local_repo_path
 from .auth import require_same_origin_for_mutations, require_session
 
 def _repo_full_name() -> str:
@@ -113,13 +114,30 @@ async def list_repositories(user: dict[str, Any] = Depends(require_session)):
     路径仓库的 ``full_name`` 即宿主绝对路径本身(沙箱挂载直达该路径,
     见 utils/repo.py 的 normalize_repo_meta)。
     """
-    repositories = [{"full_name": _repo_full_name(), "private": True}]
+    # 每项带 local_path = 沙箱实际挂载/操作的宿主目录(tooltip 展示用)
+    repositories = [
+        {
+            "full_name": _repo_full_name(),
+            "private": True,
+            "local_path": resolve_local_repo_path(
+                normalize_repo_meta(_repo_full_name(), create=False)
+            ),
+        }
+    ]
     seen = {repositories[0]["full_name"]}
     for entry in await _read_local_repos(user["sub"]):
         full_name = str(entry.get("path") or "").strip().rstrip("/")
         if full_name and full_name not in seen:
             seen.add(full_name)
-            repositories.append({"full_name": full_name, "private": True})
+            repositories.append(
+                {
+                    "full_name": full_name,
+                    "private": True,
+                    "local_path": resolve_local_repo_path(
+                        normalize_repo_meta(full_name, create=False)
+                    ),
+                }
+            )
     return {"installations": [], "repositories": repositories}
 
 

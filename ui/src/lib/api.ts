@@ -166,6 +166,8 @@ export interface ProfileUpdate {
 export interface Repository {
   full_name: string
   private: boolean
+  /** 沙箱实际挂载/操作的宿主目录(下拉项悬停提示) */
+  local_path?: string | null
 }
 
 export interface Installation {

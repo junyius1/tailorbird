@@ -7,10 +7,15 @@ import {
   XIcon,
 } from "@phosphor-icons/react"
 
+import {
+  Tooltip,
+  TooltipPopup,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { useRefreshRepos } from "@/lib/profile"
 import { cn } from "@/lib/utils"
 
-type RepoOption = { full_name: string }
+type RepoOption = { full_name: string; local_path?: string | null }
 
 interface RepoSelectorProps {
   repos?: Array<RepoOption>
@@ -171,15 +176,19 @@ export function RepoSelector({
             ) : (
               filteredRepos.map((repo) => {
                 const selected = repo.full_name === selectedRepo
-                return (
+                // 悬停提示:该项对应的宿主实际路径(后端解析)
+                const tip =
+                  repo.local_path ||
+                  (repo.full_name.startsWith("/")
+                    ? repo.full_name
+                    : repo.full_name)
+                const button = (
                   <button
-                    key={repo.full_name}
                     type="button"
                     onClick={() => {
                       onRepoChange(repo.full_name)
                       close()
                     }}
-                    title={repo.full_name}
                     className={cn(
                       "flex w-full items-center px-2 py-1.5 text-left transition-colors hover:bg-muted",
                       selected ? "text-foreground" : "text-muted-foreground"
@@ -192,6 +201,19 @@ export function RepoSelector({
                       </span>
                     )}
                   </button>
+                )
+                return (
+                  <Tooltip key={repo.full_name}>
+                    <TooltipTrigger render={button} />
+                    <TooltipPopup
+                      side="right"
+                      align="start"
+                      variant="glass"
+                      className="max-w-80 font-mono text-[11px]"
+                    >
+                      {tip}
+                    </TooltipPopup>
+                  </Tooltip>
                 )
               })
             )}

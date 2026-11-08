@@ -27,7 +27,14 @@ function sanitizeRepositories(value: unknown): Array<Repository> {
     if (!entry || typeof entry !== "object") continue
     const raw = entry as Record<string, unknown>
     if (typeof raw.full_name !== "string" || !raw.full_name) continue
-    out.push({ full_name: raw.full_name, private: raw.private === true })
+    out.push({
+      full_name: raw.full_name,
+      private: raw.private === true,
+      local_path:
+        typeof raw.local_path === "string" && raw.local_path
+          ? raw.local_path
+          : null,
+    })
   }
   return out
 }
