@@ -8,9 +8,19 @@ import { dashboardApiBase } from "./api-base"
  * stay same-origin; a server render has no relative base to resolve against and
  * goes straight to the backend.
  */
+// 本地默认:与 vite dev proxy / 生产 nitro handler 的上游一致(127.0.0.1:8002)。
+// 缺了它,SSR 的服务端 origin 为空 → /me 走相对 URL → 抛错 → 会话判为未登录,
+// 已登录用户也会被 307 回 /login(登录闪屏)。
+const DEFAULT_DASHBOARD_API_URL = "http://127.0.0.1:8002"
+
 export const dashboardRequestOrigin = createIsomorphicFn()
   .client(() => dashboardApiBase())
-  .server(() => (process.env.DASHBOARD_API_URL ?? "").replace(/\/$/, ""))
+  .server(() =>
+    (process.env.DASHBOARD_API_URL ?? DEFAULT_DASHBOARD_API_URL).replace(
+      /\/$/,
+      ""
+    )
+  )
 
 /**
  * `credentials: "include"` means nothing on the server, so the session cookie

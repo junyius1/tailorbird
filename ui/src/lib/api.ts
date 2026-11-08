@@ -2,7 +2,7 @@
 //
 // 所有请求经同 origin 的 /dashboard/api 代理(credentials 带 tb_session
 // cookie),浏览器不接触任何 token。后端:tailorbird dashboard(:8002)。
-import { dashboardApiUrl } from "./dashboard-fetch"
+import { dashboardApiUrl, dashboardForwardedHeaders } from "./dashboard-fetch"
 
 export class ApiError extends Error {
   constructor(
@@ -20,6 +20,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
+      ...dashboardForwardedHeaders(),
       ...init.headers,
     },
   })
