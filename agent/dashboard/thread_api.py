@@ -156,6 +156,9 @@ def _thread_summary(thread: dict[str, Any], user: dict[str, Any] | None = None) 
         "createdAt": thread.get("created_at"),
         "updatedAt": thread.get("updated_at"),
         "lastUserMessage": metadata.get("last_user_message"),
+        # transcript 由客户端从 SDK 水合(GET …/state → stream.messages);
+        # summary 只带元数据,但前端 AgentThread 类型要求 messages 存在(上游同此)。
+        "messages": [],
         "isOwner": bool(user and (metadata.get("local_user") in (None, user["sub"]) or _is_admin(user))),
     }
 
