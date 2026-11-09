@@ -9,11 +9,23 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as IndexRouteImport } from './routes/index'
 import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as MySettingsRouteImport } from './routes/my-settings'
 import { Route as AgentsIndexRouteImport } from './routes/agents/index'
 import { Route as AgentsThreadIdRouteImport } from './routes/agents/$threadId'
+import { Route as AgentsReviewsRouteImport } from './routes/agents/reviews'
+import { Route as AgentsSkillsRouteImport } from './routes/agents/skills'
+import { Route as AgentsThreadsRouteImport } from './routes/agents/threads'
+import { Route as AgentsAutomationsIndexRouteImport } from './routes/agents/automations/index'
+import { Route as AgentsLocalSessionIdRouteImport } from './routes/agents/local/$sessionId'
 
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AgentsRoute = AgentsRouteImport.update({
   id: '/agents',
   path: '/agents',
@@ -22,6 +34,11 @@ const AgentsRoute = AgentsRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MySettingsRoute = MySettingsRouteImport.update({
+  id: '/my-settings',
+  path: '/my-settings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AgentsIndexRoute = AgentsIndexRouteImport.update({
@@ -34,40 +51,128 @@ const AgentsThreadIdRoute = AgentsThreadIdRouteImport.update({
   path: '/$threadId',
   getParentRoute: () => AgentsRoute,
 } as any)
+const AgentsReviewsRoute = AgentsReviewsRouteImport.update({
+  id: '/reviews',
+  path: '/reviews',
+  getParentRoute: () => AgentsRoute,
+} as any)
+const AgentsSkillsRoute = AgentsSkillsRouteImport.update({
+  id: '/skills',
+  path: '/skills',
+  getParentRoute: () => AgentsRoute,
+} as any)
+const AgentsThreadsRoute = AgentsThreadsRouteImport.update({
+  id: '/threads',
+  path: '/threads',
+  getParentRoute: () => AgentsRoute,
+} as any)
+const AgentsAutomationsIndexRoute = AgentsAutomationsIndexRouteImport.update({
+  id: '/automations/',
+  path: '/automations/',
+  getParentRoute: () => AgentsRoute,
+} as any)
+const AgentsLocalSessionIdRoute = AgentsLocalSessionIdRouteImport.update({
+  id: '/local/$sessionId',
+  path: '/local/$sessionId',
+  getParentRoute: () => AgentsRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
+  '/': typeof IndexRoute
   '/agents': typeof AgentsRouteWithChildren
   '/login': typeof LoginRoute
+  '/my-settings': typeof MySettingsRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
+  '/agents/reviews': typeof AgentsReviewsRoute
+  '/agents/skills': typeof AgentsSkillsRoute
+  '/agents/threads': typeof AgentsThreadsRoute
   '/agents/': typeof AgentsIndexRoute
+  '/agents/local/$sessionId': typeof AgentsLocalSessionIdRoute
+  '/agents/automations/': typeof AgentsAutomationsIndexRoute
 }
 export interface FileRoutesByTo {
+  '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/my-settings': typeof MySettingsRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
+  '/agents/reviews': typeof AgentsReviewsRoute
+  '/agents/skills': typeof AgentsSkillsRoute
+  '/agents/threads': typeof AgentsThreadsRoute
   '/agents': typeof AgentsIndexRoute
+  '/agents/local/$sessionId': typeof AgentsLocalSessionIdRoute
+  '/agents/automations': typeof AgentsAutomationsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
+  '/': typeof IndexRoute
   '/agents': typeof AgentsRouteWithChildren
   '/login': typeof LoginRoute
+  '/my-settings': typeof MySettingsRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
+  '/agents/reviews': typeof AgentsReviewsRoute
+  '/agents/skills': typeof AgentsSkillsRoute
+  '/agents/threads': typeof AgentsThreadsRoute
   '/agents/': typeof AgentsIndexRoute
+  '/agents/local/$sessionId': typeof AgentsLocalSessionIdRoute
+  '/agents/automations/': typeof AgentsAutomationsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/agents' | '/login' | '/agents/$threadId' | '/agents/'
+  fullPaths:
+    | '/'
+    | '/agents'
+    | '/login'
+    | '/my-settings'
+    | '/agents/$threadId'
+    | '/agents/reviews'
+    | '/agents/skills'
+    | '/agents/threads'
+    | '/agents/'
+    | '/agents/local/$sessionId'
+    | '/agents/automations/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/login' | '/agents/$threadId' | '/agents'
-  id: '__root__' | '/agents' | '/login' | '/agents/$threadId' | '/agents/'
+  to:
+    | '/'
+    | '/login'
+    | '/my-settings'
+    | '/agents/$threadId'
+    | '/agents/reviews'
+    | '/agents/skills'
+    | '/agents/threads'
+    | '/agents'
+    | '/agents/local/$sessionId'
+    | '/agents/automations'
+  id:
+    | '__root__'
+    | '/'
+    | '/agents'
+    | '/login'
+    | '/my-settings'
+    | '/agents/$threadId'
+    | '/agents/reviews'
+    | '/agents/skills'
+    | '/agents/threads'
+    | '/agents/'
+    | '/agents/local/$sessionId'
+    | '/agents/automations/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
+  IndexRoute: typeof IndexRoute
   AgentsRoute: typeof AgentsRouteWithChildren
   LoginRoute: typeof LoginRoute
+  MySettingsRoute: typeof MySettingsRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/agents': {
       id: '/agents'
       path: '/agents'
@@ -80,6 +185,13 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/my-settings': {
+      id: '/my-settings'
+      path: '/my-settings'
+      fullPath: '/my-settings'
+      preLoaderRoute: typeof MySettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/agents/': {
@@ -96,25 +208,72 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsThreadIdRouteImport
       parentRoute: typeof AgentsRoute
     }
+    '/agents/reviews': {
+      id: '/agents/reviews'
+      path: '/reviews'
+      fullPath: '/agents/reviews'
+      preLoaderRoute: typeof AgentsReviewsRouteImport
+      parentRoute: typeof AgentsRoute
+    }
+    '/agents/skills': {
+      id: '/agents/skills'
+      path: '/skills'
+      fullPath: '/agents/skills'
+      preLoaderRoute: typeof AgentsSkillsRouteImport
+      parentRoute: typeof AgentsRoute
+    }
+    '/agents/threads': {
+      id: '/agents/threads'
+      path: '/threads'
+      fullPath: '/agents/threads'
+      preLoaderRoute: typeof AgentsThreadsRouteImport
+      parentRoute: typeof AgentsRoute
+    }
+    '/agents/automations/': {
+      id: '/agents/automations/'
+      path: '/automations'
+      fullPath: '/agents/automations/'
+      preLoaderRoute: typeof AgentsAutomationsIndexRouteImport
+      parentRoute: typeof AgentsRoute
+    }
+    '/agents/local/$sessionId': {
+      id: '/agents/local/$sessionId'
+      path: '/local/$sessionId'
+      fullPath: '/agents/local/$sessionId'
+      preLoaderRoute: typeof AgentsLocalSessionIdRouteImport
+      parentRoute: typeof AgentsRoute
+    }
   }
 }
 
 interface AgentsRouteChildren {
   AgentsThreadIdRoute: typeof AgentsThreadIdRoute
+  AgentsReviewsRoute: typeof AgentsReviewsRoute
+  AgentsSkillsRoute: typeof AgentsSkillsRoute
+  AgentsThreadsRoute: typeof AgentsThreadsRoute
   AgentsIndexRoute: typeof AgentsIndexRoute
+  AgentsLocalSessionIdRoute: typeof AgentsLocalSessionIdRoute
+  AgentsAutomationsIndexRoute: typeof AgentsAutomationsIndexRoute
 }
 
 const AgentsRouteChildren: AgentsRouteChildren = {
   AgentsThreadIdRoute: AgentsThreadIdRoute,
+  AgentsReviewsRoute: AgentsReviewsRoute,
+  AgentsSkillsRoute: AgentsSkillsRoute,
+  AgentsThreadsRoute: AgentsThreadsRoute,
   AgentsIndexRoute: AgentsIndexRoute,
+  AgentsLocalSessionIdRoute: AgentsLocalSessionIdRoute,
+  AgentsAutomationsIndexRoute: AgentsAutomationsIndexRoute,
 }
 
 const AgentsRouteWithChildren =
   AgentsRoute._addFileChildren(AgentsRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
+  IndexRoute: IndexRoute,
   AgentsRoute: AgentsRouteWithChildren,
   LoginRoute: LoginRoute,
+  MySettingsRoute: MySettingsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

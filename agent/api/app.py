@@ -39,6 +39,7 @@ except Exception:  # dotenv 缺失不阻断启动(下方各 env 读取自行 fai
 from ..dashboard.agent_instructions import router as agent_instructions_router
 from ..dashboard.auth import router as auth_router
 from ..dashboard.options import router as options_router
+from ..dashboard.langgraph_proxy import router as langgraph_proxy_router
 from ..dashboard.plan_api import plan_router
 from ..dashboard.profiles import router as profiles_router
 from ..dashboard.schedules import router as schedules_router
@@ -138,6 +139,9 @@ def create_app() -> FastAPI:
     # 路由(全部挂 /dashboard/api 前缀,UI 只代理该前缀)
     app.include_router(auth_router, prefix="/dashboard/api")
     app.include_router(thread_router)
+    # LangGraph 协议代理须在 thread_router 之后注册:同路径时 thread_router 的
+    # 定制端点(有界 state/history、SSE 透传)优先,协议面补齐 runs/* 等
+    app.include_router(langgraph_proxy_router)
     app.include_router(plan_router)
     app.include_router(workflow_approval_router)
     app.include_router(schedules_router)
