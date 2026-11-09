@@ -10,6 +10,9 @@
   ``-v <线程 .gitconfig-sandbox>:/workspace/.gitconfig-sandbox:ro`` +
   ``GIT_CONFIG_GLOBAL=/workspace/.gitconfig-sandbox`` → commit 作者 = 线程 owner 的 git 身份。
 - 命令执行 = ``docker exec -i -w /workspace/<repo> <容器> sh -lc <cmd>``;
+- 文件/搜索工具(继承自 ``BaseSandbox``)在**容器路径空间**工作
+  (``/workspace/<repo>/...``),``upload_files``/``download_files`` 把容器路径
+  映射到 bind mount 宿主路径落盘(零拷贝),命令仍走 docker exec。
   超时 = SIGTERM/SIGKILL 该 exec 进程(不杀容器)。
 - **不挂** Docker socket、**不注入**任何 API key / GitHub token。
 - run 结束**不销毁**(线程复用);删线程时 best-effort ``docker rm -f``。
@@ -29,6 +32,7 @@ from deepagents.backends.protocol import (
     FileDownloadResponse,
     FileUploadResponse,
 )
+from deepagents.backends.sandbox import BaseSandbox
 
 logger = logging.getLogger(__name__)
 
@@ -213,7 +217,7 @@ def _repo_mount_point(repo: dict | None) -> tuple[str, str | None]:
     return f"{_WORKSPACE_ROOT}/{name}", str(host)
 
 
-class DockerSandbox:
+class DockerSandbox(BaseSandbox):
     """本地 Docker 容器沙箱后端(实现 SandboxBackendProtocol)。
 
     文件/搜索操作直接走 bind mount 的宿主路径(零拷贝、快),
@@ -412,10 +416,30 @@ class DockerSandbox:
     # ---- 文件操作(走 bind mount 的宿主路径直读,零拷贝)------------------
 
     def _host_path_for(self, path: str) -> Path:
-        """容器内相对/绝对路径 → 宿主路径(相对路径挂在仓库目录下)。"""
+        """容器路径 → 宿主路径(upload_files/download_files/delete 用)。
+
+        ``BaseSandbox`` 的文件方法传入的是**容器绝对路径**(如
+        ``/workspace/<repo>/x.py``),而仓库是 bind mount:容器里
+        ``<workdir>/...`` 对应宿主的 ``self._host_repo/...``。因此:
+        - 无仓库回退(容器根 = /workspace):宿主根 =
+          ``LOCAL_SANDBOX_ROOT_DIR/workspace``(与 ``_repo_mount_point`` 一致);
+        - 有仓库:``workdir`` 前缀替换为宿主仓库路径。
+        相对路径与容器根内其它路径(如 ``/tmp``)按原样挂到对应宿主根下。
+        """
         cleaned = str(path).lstrip("/")
         if not self._host_repo:
-            return Path(self._workdir) / cleaned
+            root = Path(
+                os.environ.get("LOCAL_SANDBOX_ROOT_DIR", "/tmp/tailorbird-sandboxes")
+            ) / "workspace"
+            return root / cleaned
+        wd = self._workdir.lstrip("/")
+        if not cleaned:
+            return Path(self._host_repo)
+        if cleaned == wd:
+            return Path(self._host_repo)
+        if cleaned.startswith(wd + "/"):
+            return Path(self._host_repo) / cleaned[len(wd) + 1 :]
+        # 容器根内、仓库挂载之外的路径(如 /tmp):挂到宿主仓库根下尽力映射
         return Path(self._host_repo) / cleaned
 
     def upload_files(
