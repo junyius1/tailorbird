@@ -327,11 +327,11 @@ export function AgentThreadView({
           </div>
         ) : isHydrating ? (
           <div className="flex flex-1 items-center justify-center px-6">
-            <img
-              src="/logo-mark.png"
-              alt="Loading conversation"
-              className="size-12 animate-pulse"
-            />
+              <span
+                role="img"
+                aria-label="Loading conversation"
+                className="size-12 animate-pulse bg-[url(/logo-mark.png)] bg-center bg-[length:100%_100%] bg-no-repeat"
+              />
           </div>
         ) : (
           <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6">

@@ -282,7 +282,10 @@ export function AgentsSidebar({
           to={localOnly ? "/agents" : "/my-settings"}
           className="flex items-center gap-2 font-heading text-sm font-medium tracking-tight text-foreground"
         >
-          <img src="/logo-mark.png" alt="" className="size-10" />
+            <span
+              aria-hidden
+              className="size-10 bg-[url(/logo-mark.png)] bg-center bg-[length:100%_100%] bg-no-repeat"
+            />
           Tailorbird
         </Link>
         <div className="flex items-center gap-1">
