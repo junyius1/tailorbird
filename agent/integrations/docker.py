@@ -14,6 +14,10 @@
   (``/workspace/<repo>/...``),``upload_files``/``download_files`` 把容器路径
   映射到 bind mount 宿主路径落盘(零拷贝),命令仍走 docker exec。
   超时 = SIGTERM/SIGKILL 该 exec 进程(不杀容器)。
+- ``DOCKER_SANDBOX_EXTRA_MOUNTS``(逗号分隔,可选)把宿主任意路径挂进容器:
+  每项 ``宿主路径:容器内路径[:ro]``,宿主路径支持 ``~`` 展开,缺省只读;
+  例 ``~/Downloads:/host/downloads:/root:/host/root``。仅对新创建的容器
+  生效;已存在容器复用原挂载,改 env 后需删线程重建容器。
 - **不挂** Docker socket、**不注入**任何 API key / GitHub token。
 - run 结束**不销毁**(线程复用);删线程时 best-effort ``docker rm -f``。
 """
@@ -46,6 +50,10 @@ _GITCONFIG_PATH = "/workspace/.gitconfig-sandbox"
 _GITCONFIG_ROOT = Path(os.environ.get("DOCKER_SANDBOX_GITCONFIG_DIR", "/tmp/tailorbird-gitconfig"))
 # 默认命令超时(秒)
 _DEFAULT_COMMAND_TIMEOUT = 600
+# 额外宿主挂载的环境变量(逗号分隔:宿主路径:容器内路径[:ro])
+_EXTRA_MOUNTS_ENV = "DOCKER_SANDBOX_EXTRA_MOUNTS"
+# 容器内额外挂载的根目录(避免与 /workspace 及常用路径冲突)
+_EXTRA_MOUNT_ROOT = "/host"
 
 
 class DockerSandboxError(RuntimeError):
@@ -176,6 +184,46 @@ def _read_host_git_identity() -> tuple[str | None, str | None]:
                 if name or email:
                     return name, email
     return None, None
+
+
+def _extra_mounts() -> list[str]:
+    """解析 DOCKER_SANDBOX_EXTRA_MOUNTS → docker ``-v`` 参数字段列表。
+
+    格式:逗号分隔,每项 ``宿主路径:容器内路径[:ro]``。
+    - 宿主路径支持 ``~`` 展开;不存在时自动创建(与 docker 行为一致)。
+    - 容器内路径缺省 = ``/host/<宿主路径绝对形式(去掉前导 /)>``;
+      挂载模式缺省只读(ro),显式 ``:rw`` 才允许容器内写入。
+    配置错误(空项、缺冒号)只告警跳过,不阻断沙箱创建。
+    """
+    raw = os.environ.get(_EXTRA_MOUNTS_ENV, "")
+    volumes: list[str] = []
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        try:
+            parts = entry.split(":")
+            if len(parts) < 2 or not parts[0].strip() or not parts[1].strip():
+                raise ValueError(f"格式应为 宿主路径:容器内路径[:ro],实际为 {entry!r}")
+            host_part = parts[0].strip()
+            container_part = parts[1].strip()
+            mode = ":".join(parts[2:]).strip() if len(parts) > 2 else ""
+            if mode not in ("", "ro", "rw"):
+                raise ValueError(f"挂载模式只支持 ro/rw,实际为 {mode!r}")
+            # 缺省只读;显式 :rw 才允许容器内写入
+            ro_flag = "" if mode == "rw" else ":ro"
+            if not host_part.startswith("/") and not host_part.startswith("~"):
+                raise ValueError(f"宿主路径必须是绝对路径(支持 ~): {host_part!r}")
+            host = str(Path(host_part).expanduser().resolve())
+            if not container_part.startswith("/"):
+                container_part = f"{_EXTRA_MOUNT_ROOT}/{container_part}"
+            Path(host).mkdir(parents=True, exist_ok=True)
+            volumes += ["-v", f"{host}:{container_part}{ro_flag}"]
+        except ValueError as exc:
+            logger.warning("DOCKER_SANDBOX_EXTRA_MOUNTS 项 %r 已忽略: %s", entry, exc)
+    if volumes:
+        logger.info("沙箱额外挂载: %s", " ".join(volumes))
+    return volumes
 
 
 def _repo_mount_point(repo: dict | None) -> tuple[str, str | None]:
@@ -320,6 +368,8 @@ class DockerSandbox(BaseSandbox):
                 "-v",
                 f"{self._host_repo}:{self._workdir}",
             ]
+        # 额外宿主挂载(DOCKER_SANDBOX_EXTRA_MOUNTS;缺省只读)
+        args += _extra_mounts()
         # 网络:bridge(默认)或 none(断网)
         if network == "none":
             args += ["--network", "none"]
@@ -536,6 +586,8 @@ def validate_docker_startup_config() -> None:
     image = os.environ.get("DOCKER_SANDBOX_IMAGE", "python:3.12-slim")
     if not image:
         raise RuntimeError("DOCKER_SANDBOX_IMAGE 不能为空")
+    # 额外挂载:启动时解析校验(配置错误尽早暴露;坏项只告警不阻断)
+    _extra_mounts()
 
 
 async def create_docker_sandbox(
