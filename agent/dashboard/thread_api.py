@@ -1006,33 +1006,39 @@ async def _sse_upstream(
                     return
 
             disconnect_task = asyncio.ensure_future(_watch_disconnect())
-            # 逐 chunk 读,受空闲/存活上限约束
-            idle_deadline = asyncio.get_event_loop().time() + _STREAM_IDLE_TIMEOUT
+            # 逐 chunk 读,受空闲/存活上限约束。
+            # 注意:aiter_bytes() 只能调用一次(httpx 流式响应一次性消费,
+            # 二次调用抛 StreamConsumed),必须在循环外创建迭代器;超时/断连
+            # 通过取消 read_task 实现,而不是丢弃半消费的迭代器。
+            chunks = response.aiter_bytes()
             while True:
                 remaining_lifetime = (
                     deadline_start + _STREAM_MAX_LIFETIME - asyncio.get_event_loop().time()
                 )
                 budget = max(0.1, min(_STREAM_IDLE_TIMEOUT, remaining_lifetime))
+                read_task = asyncio.ensure_future(anext(chunks))
                 try:
-                    chunk = await asyncio.wait_for(
-                        anext(response.aiter_bytes()), timeout=budget
-                    )
-                except (StopAsyncIteration,):
+                    chunk = await asyncio.wait_for(read_task, timeout=budget)
+                except StopAsyncIteration:
                     break  # 上游正常结束(run 终止帧后关流)
                 except (TimeoutError, asyncio.TimeoutError):
                     break  # 空闲/存活超时
+                except httpx.HTTPError as exc:
+                    read_task.cancel()
+                    yield f"event: error\ndata: {json.dumps({'detail': str(exc)[:300]})}\n\n"
+                    break
                 if not chunk:
                     break
-                idle_deadline = asyncio.get_event_loop().time() + _STREAM_IDLE_TIMEOUT
                 yield chunk
                 # 客户端断开检查
                 if disconnect_task.done():
+                    read_task.cancel()
                     break
         except httpx.HTTPError as exc:
             yield f"event: error\ndata: {json.dumps({'detail': str(exc)[:300]})}\n\n"
         finally:
             # 客户端断开/超时/结束:必须取消并释放上游订阅(否则泄漏事件循环)
-            for task in (disconnect_task,):
+            for task in (read_task, disconnect_task):
                 if task is not None and not task.done():
                     task.cancel()
                     try:
