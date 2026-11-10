@@ -35,6 +35,7 @@ import { DesktopThreadSourceToggle } from "@/features/agents/components/DesktopT
 import { SidebarFilterMenu } from "@/features/agents/components/SidebarFilterMenu"
 import { SidebarProjectSelector } from "@/features/agents/components/SidebarProjectSelector"
 import { Button } from "@/components/ui/button"
+import { Popover, PopoverPopup, PopoverTrigger } from "@/components/ui/popover"
 import {
   SidebarCollapseButton,
   SidebarFrame,
@@ -278,16 +279,39 @@ export function AgentsSidebar({
           isDesktop ? "pt-13" : "pt-5"
         )}
       >
-        <Link
-          to={localOnly ? "/agents" : "/my-settings"}
-          className="flex items-center gap-2 font-heading text-sm font-medium tracking-tight text-foreground"
-        >
-            <span
-              aria-hidden
-              className="size-10 bg-[url(/logo-mark.png)] bg-center bg-[length:100%_100%] bg-no-repeat"
+        <div className="flex items-center gap-2">
+          <Popover>
+            <PopoverTrigger
+              nativeButton={false}
+              render={<span />}
+              openOnHover
+              delay={250}
+              closeDelay={200}
+              role="img"
+              tabIndex={-1}
+              aria-label="Tailorbird logo,悬停查看原图"
+              className="block size-10 bg-[url(/logo-mark.png)] bg-center bg-[length:100%_100%] bg-no-repeat"
             />
-          Tailorbird
-        </Link>
+            <PopoverPopup
+              side="right"
+              align="center"
+              sideOffset={10}
+              className="w-fit p-2"
+            >
+              <span
+                role="img"
+                aria-label="Tailorbird logo 原图预览"
+                className="block size-64 max-w-[min(16rem,calc(100vw-2.5rem))] rounded-md bg-[url(/logo-mark.png)] bg-center bg-[length:100%_100%] bg-no-repeat"
+              />
+            </PopoverPopup>
+          </Popover>
+          <Link
+            to={localOnly ? "/agents" : "/my-settings"}
+            className="font-heading text-sm font-medium tracking-tight text-foreground"
+          >
+            Tailorbird
+          </Link>
+        </div>
         <div className="flex items-center gap-1">
           <button
             type="button"
