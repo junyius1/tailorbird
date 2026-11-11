@@ -586,6 +586,8 @@ def _enrich_run_start(
         metadata.setdefault("local_user", user["sub"])
         metadata.setdefault("thread_category", "interactive")
         metadata.setdefault("trigger_kind", "user")
+        # 缺省未解决:侧栏/列表按 resolved 分组,缺 key 的线程两边都查不到
+        metadata.setdefault("resolved", False)
         # 标题:首条消息前 80 字符
         title = ""
         input_messages = (params.get("input") or {}).get("messages") or []

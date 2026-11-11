@@ -82,6 +82,7 @@ async def launch_scheduled_agent_run(schedule_id: str) -> dict[str, Any]:
         "local_user": owner,
         "thread_category": "interactive",
         "trigger_kind": "schedule",
+        "resolved": False,
         "automation_id": schedule_id,
         "automation_name": name,
         "title": f"[定时] {name}",
@@ -187,6 +188,7 @@ async def _launch(state: SchedulerState, config: RunnableConfig) -> dict[str, An
                         "source": "schedule",
                         "local_user": local_user,
                         "trigger_kind": "schedule",
+                        "resolved": False,
                         "title": f"[定时] {state.get('name') or 'scheduled run'}",
                     }
                 )
