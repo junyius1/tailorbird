@@ -14,7 +14,7 @@ from langchain_core.messages import AIMessage, SystemMessage
 logger = logging.getLogger(__name__)
 
 # 缺省单次 run 的 model 调用上限
-DEFAULT_RUN_MODEL_CALL_LIMIT = 150
+DEFAULT_RUN_MODEL_CALL_LIMIT = 15000
 
 
 class ModelCallLimitMiddleware(AgentMiddleware):
