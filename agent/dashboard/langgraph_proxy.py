@@ -114,6 +114,7 @@ def _stamp_run_body(body: dict[str, Any], user: dict[str, Any]) -> dict[str, Any
     metadata["source"] = "dashboard"
     metadata["thread_category"] = "interactive"
     metadata["trigger_kind"] = "user"
+    metadata.setdefault("resolved", False)
     title = _first_human_text(body)
     if title:
         short = title[:_TITLE_MAX] + ("…" if len(title) > _TITLE_MAX else "")
