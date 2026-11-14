@@ -52,10 +52,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         reader = StateReader(config.database_uri)
         set_reader(reader)
 
+        from .engines import RunRegistry
+
+        run_registry = RunRegistry(
+            checkpointer=checkpointer,
+            store=store,
+            threads=threads,
+            buffer_size=config.event_buffer_size,
+        )
+
         app.state.checkpointer = checkpointer
         app.state.store = store
         app.state.threads = threads
         app.state.state_reader = reader
+        app.state.run_registry = run_registry
 
         set_globals(
             config=config,
@@ -63,6 +73,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             store=store,
             threads=threads,
             state_reader=reader,
+            run_registry=run_registry,
         )
         auth.mark_ready()
         logger.info(
@@ -100,11 +111,14 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    from .routes import meta, store, threads as threads_routes
+    from .routes import commands, meta, runs, store, stream_events, threads as threads_routes
 
     app.include_router(meta.router)
     app.include_router(store.router)
     app.include_router(threads_routes.router)
+    app.include_router(runs.router)
+    app.include_router(commands.router)
+    app.include_router(stream_events.router)
     return app
 
 

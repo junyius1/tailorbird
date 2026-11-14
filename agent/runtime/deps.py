@@ -45,12 +45,18 @@ def set_globals(
     store: Any,
     threads: ThreadRegistry,
     state_reader: StateReader,
+    run_registry: Any = None,
 ) -> None:
     _state["config"] = config
     _state["checkpointer"] = checkpointer
     _state["store"] = store
     _state["threads"] = threads
     _state["state_reader"] = state_reader
+    _state["run_registry"] = run_registry
+
+
+def get_run_registry(request: Request) -> Any:
+    return request.app.state.run_registry
 
 
 def global_checkpointer() -> Any:
