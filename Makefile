@@ -28,6 +28,11 @@ install: bootstrap
 runtime:
 	LANGGRAPH_URL=http://localhost:$(RUNTIME_PORT) LANGGRAPH_PORT=$(RUNTIME_PORT) $(LG) dev --no-reload --port $(RUNTIME_PORT)
 
+## 自研运行时(替代 langgraph dev):独立 FastAPI 进程,读路径+store+认证
+## 验证期用 RUNTIME_PORT=2027 与 :2026 并存做差分;Phase 3 切换后顶替 :2026
+runtime-new:
+	RUNTIME_PORT=$(RUNTIME_PORT) $(PY) -m agent.runtime
+
 ## dashboard 服务器:独立 uvicorn 进程(:8002),浏览器只连它;内部以复合 bearer 调运行时
 ## .env 由 app 自行 load_dotenv 加载;LANGGRAPH_URL 指向运行时端口
 dashboard:
