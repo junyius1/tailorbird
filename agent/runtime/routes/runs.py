@@ -17,8 +17,10 @@ dashboard 轮询 ``runs.list`` / 线程 state 刷新展示态。
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Request, Response
@@ -54,6 +56,10 @@ def _command_input(command: Any) -> Any:
 
 def _thread_exists(threads: ThreadRegistry, thread_id: str) -> bool:
     return threads.exists(thread_id)
+
+
+def _now_iso() -> str:
+    return datetime.now(UTC).isoformat()
 
 
 @router.post("/threads/{thread_id}/runs")
@@ -132,6 +138,39 @@ async def _create_run(
     durability = body.get("durability")
     if not isinstance(durability, str) or not durability:
         durability = None
+
+    # after_seconds:延时 run(交给 cron 注册表的调度任务)
+    after_seconds = body.get("after_seconds")
+    if isinstance(after_seconds, (int, float)) and after_seconds > 0:
+        from ..crons import CronRegistry
+
+        crons: CronRegistry = request.app.state.cron_registry
+        run_id = crons.add_delayed_run(
+            thread_id=thread_id,
+            assistant_id=assistant_id,
+            input=graph_input,
+            metadata=metadata,
+            after_seconds=float(after_seconds),
+            user=user,
+            source=source,
+        )
+        return Response(
+            content=json.dumps(
+                {
+                    "run_id": run_id,
+                    "thread_id": thread_id,
+                    "assistant_id": assistant_id,
+                    "status": "pending",
+                    "created_at": _now_iso(),
+                    "updated_at": _now_iso(),
+                    "metadata": metadata,
+                },
+                ensure_ascii=False,
+            ).encode("utf-8"),
+            status_code=200,
+            media_type="application/json",
+            headers={"Content-Location": f"/threads/{thread_id}/runs/{run_id}"},
+        )
 
     graph_id = assistant_id if assistant_id in ("agent", "scheduler") else "agent"
     engine = runs.engine(thread_id, graph_id=graph_id)
@@ -295,3 +334,70 @@ def _run_json(record: dict[str, Any]) -> bytes:
     import json
 
     return json.dumps(record, ensure_ascii=False, default=str).encode("utf-8")
+
+
+# ---------------------------------------------------------------------------
+# cron 面(dashboard schedules 注册;替代 inmem 的 /runs/crons)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/runs/crons", status_code=201)
+async def create_cron(
+    request: Request,
+    user: str = Depends(require_identity),
+):
+    from ..crons import CronRegistry
+
+    crons: CronRegistry = request.app.state.cron_registry
+    body = await _json_body(request)
+    cron = body.get("cron")
+    assistant_id = body.get("assistant_id") or "scheduler"
+    try:
+        record = crons.add(
+            cron=cron,
+            assistant_id=assistant_id,
+            input=body.get("input"),
+            metadata=body.get("metadata") if isinstance(body.get("metadata"), dict) else {},
+            thread_id=body.get("thread_id") if isinstance(body.get("thread_id"), str) else None,
+        )
+    except ValueError as exc:
+        return Response(
+            status_code=422,
+            content=json.dumps({"detail": str(exc)}).encode("utf-8"),
+            media_type="application/json",
+        )
+    return Response(
+        content=json.dumps(record.to_dict(), ensure_ascii=False).encode("utf-8"),
+        status_code=201,
+        media_type="application/json",
+    )
+
+
+@router.get("/runs/crons")
+async def list_crons(
+    request: Request,
+    user: str = Depends(require_identity),
+):
+    from ..crons import CronRegistry
+
+    crons: CronRegistry = request.app.state.cron_registry
+    return Response(
+        content=json.dumps(
+            [r.to_dict() for r in crons.list()], ensure_ascii=False
+        ).encode("utf-8"),
+        media_type="application/json",
+    )
+
+
+@router.delete("/runs/crons/{cron_id}", status_code=204)
+async def delete_cron(
+    cron_id: str,
+    request: Request,
+    user: str = Depends(require_identity),
+):
+    from ..crons import CronRegistry
+
+    crons: CronRegistry = request.app.state.cron_registry
+    if not crons.remove(cron_id):
+        return Response(status_code=404, content=b"")
+    return Response(status_code=204)

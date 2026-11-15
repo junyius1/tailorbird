@@ -46,10 +46,12 @@ RUN_TIMEOUT = "timeout"
 RUN_INTERRUPTED = "interrupted"
 _TERMINAL = frozenset({RUN_SUCCESS, RUN_ERROR, RUN_TIMEOUT, RUN_INTERRUPTED})
 
-# 终态 → 线程展示态映射(dashboard thread_api 同款)
+# 终态 → 线程 status 映射(inmem wire 词汇:busy/idle/error/interrupted)。
+# dashboard ``get_thread_active_status`` 判活与 reconcile 搜索都按 ``status=="busy"``
+# 过滤,必须与 inmem 一致(展示态由 dashboard 从 latest_run_status 另行推导)。
 _STATUS_TO_THREAD = {
-    RUN_PENDING: "running",
-    RUN_RUNNING: "running",
+    RUN_PENDING: "busy",
+    RUN_RUNNING: "busy",
     RUN_ERROR: "error",
     RUN_TIMEOUT: "error",
     RUN_INTERRUPTED: "interrupted",
@@ -271,8 +273,8 @@ class ThreadRunEngine:
         self._active = run_id
         self._terminal_emitted = False
         self._pending_interrupts.clear()
-        # 线程展示态
-        self._threads.set_status(self.thread_id, "running")
+        # 线程 status(inmem 词汇 busy)
+        self._threads.set_status(self.thread_id, "busy")
         self._threads.patch_metadata(
             self.thread_id,
             {"latest_run_status": RUN_RUNNING, "latest_run_id": run_id, "status": "busy"},
@@ -492,7 +494,7 @@ class ThreadRunEngine:
             {
                 "latest_run_status": status,
                 "latest_run_id": record.run_id,
-                "status": "busy" if status == RUN_RUNNING else "idle",
+                "status": _STATUS_TO_THREAD.get(status, "idle"),
             },
         )
         state_cache().invalidate(self.thread_id)

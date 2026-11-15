@@ -5,7 +5,7 @@
   使进程启动失败(fail-closed),绝不带内存态运行;
 - ``.langgraph_api/`` 的 pickle 落盘(inmem 默认)不作为状态来源。
 
-通过 ``langgraph.json`` 接线:
+(自研运行时 ``agent.runtime`` 直接 import;旧 langgraph.json 接线已移除):
 
     "checkpointer": {"path": "agent.postgres_persistence:create_checkpointer", ...}
     "store":        {"path": "agent.postgres_persistence:create_store"}

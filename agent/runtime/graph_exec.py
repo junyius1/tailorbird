@@ -52,8 +52,10 @@ def build_run_config(
     """run 执行 config。返回 (config, run_control)。"""
     configurable = dict(configurable or {})
     configurable["thread_id"] = thread_id
-    configurable["local_user"] = user
-    configurable["source"] = source
+    # 调用方(如 scheduler 的属主)显式提供的 local_user/source 优先;
+    # 请求鉴权身份仅作兜底(无身份头时)
+    configurable.setdefault("local_user", user)
+    configurable.setdefault("source", source)
     configurable["__is_for_execution__"] = True
     run_control = RunControl()
     # 执行态 Runtime:store 供中间件(Runtime.store);control 供 Pregel 顶层
@@ -78,12 +80,35 @@ async def get_exec_graph(
     *,
     graph_id: str = "agent",
 ) -> tuple[Any, Any]:
-    """建执行态图(带沙箱)+ 挂 checkpointer。返回 (graph, async_ctx)。
+    """建执行态图 + 挂 checkpointer。返回 (graph, async_ctx)。
 
-    ``async_ctx`` 是 ``traced_agent`` 的异步上下文,调用方用完必须
-    ``await async_ctx.__aexit__(None, None, None)``。
+    ``async_ctx`` 调用方用完必须 ``await async_ctx.__aexit__(None, None, None)``:
+    - ``agent`` → ``traced_agent`` 异步上下文(带沙箱);
+    - ``scheduler`` → 同步工厂,包一个 no-op 异步上下文(无沙箱、无资源)。
     """
-    # 图工厂从 config 读 __is_for_execution__/local_user/model 等
+    if graph_id == "scheduler":
+        from contextlib import asynccontextmanager
+
+        from ..scheduler import get_scheduler
+
+        graph = get_scheduler(run_config)
+        graph.checkpointer = checkpointer
+        if hasattr(graph, "store"):
+            try:
+                graph.store = store
+            except Exception:
+                logger.debug("scheduler graph.store 不可写,依赖 Runtime.store", exc_info=True)
+
+        @asynccontextmanager
+        async def _noop_ctx():
+            yield graph
+
+        # 立即进入,返回已建立的上下文(与 traced_agent 用法一致)
+        ctx = _noop_ctx()
+        await ctx.__aenter__()
+        return graph, ctx
+
+    # agent:图工厂从 config 读 __is_for_execution__/local_user/model 等
     ctx = traced_agent(run_config)
     graph = await ctx.__aenter__()
     graph.checkpointer = checkpointer

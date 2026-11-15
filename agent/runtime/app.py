@@ -40,11 +40,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     require_database_uri()  # fail-closed
     app.state.runtime_config = config
 
+    # 图内客户端(scheduler/dispatch 的 langgraph_client)必须打到**本运行时**。
+    # 旧 langgraph dev 用进程内 ASGI loopback 保证这一点;自研运行时经 HTTP,
+    # 显式把 LANGGRAPH_URL 钉到 self_url(load_dotenv override 可能把它带偏,
+    # 例如验证期与旧运行时并存时)。dashboard 进程不受影响(它有自己的 env)。
+    os.environ["LANGGRAPH_URL"] = config.self_url
+
     checkpointer_cm = create_checkpointer()
     store_cm = create_store()
     checkpointer = await checkpointer_cm.__aenter__()
     store = await store_cm.__aenter__()
     try:
+        from .threads import set_store as set_thread_store
+
+        set_thread_store(store)
         threads = ThreadRegistry()
         n = await threads.rebuild_from_checkpoints(config.database_uri)
         logger.info("runtime 启动:重建线程 %d 条", n)
@@ -61,11 +70,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             buffer_size=config.event_buffer_size,
         )
 
+        from .crons import CronRegistry
+
+        cron_registry = CronRegistry(run_registry=run_registry, threads=threads)
+
         app.state.checkpointer = checkpointer
         app.state.store = store
         app.state.threads = threads
         app.state.state_reader = reader
         app.state.run_registry = run_registry
+        app.state.cron_registry = cron_registry
 
         set_globals(
             config=config,
@@ -83,6 +97,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
         yield
     finally:
+        cron_obj = getattr(app.state, "cron_registry", None)
+        if cron_obj is not None:
+            cron_obj.close()
         reader_obj = getattr(app.state, "state_reader", None)
         if reader_obj is not None:
             reader_obj.close()

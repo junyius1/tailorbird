@@ -74,11 +74,59 @@ class ThreadRecord:
         }
 
 
+# 持久化目标:store 的 ("threads",) 命名空间(与 dashboard 的 store 访问同一
+# Postgres 表,跨进程/重启存活)。模块级单例句柄,app lifespan 启动时 set_store。
+_STORE: Any | None = None
+
+
+def set_store(store: Any) -> None:
+    global _STORE
+    _STORE = store
+
+
+def _status_from_meta(meta: dict[str, Any]) -> str:
+    """重启后从 checkpoint metadata 推导线程 status(inmem wire 词汇)。
+
+    崩溃/重启瞬间处于 pending/running 的 run 已消失 → 线程呈 ``busy``
+    (僵死),由 reconcile 清理;其余按 latest_run_status 映射。
+    """
+    status = meta.get("status")
+    if isinstance(status, str) and status:
+        return status
+    latest = meta.get("latest_run_status")
+    if latest in ("pending", "running"):
+        return "busy"
+    if latest in ("error", "timeout"):
+        return "error"
+    if latest == "interrupted":
+        return "interrupted"
+    return "idle"
+
+
+
 class ThreadRegistry:
     """线程记录内存表(单事件循环,无锁)。"""
 
     def __init__(self) -> None:
         self._threads: dict[str, ThreadRecord] = {}
+
+    def _persist(self, record: ThreadRecord) -> None:
+        """fire-and-forget 持久化到 store(失败仅告警,不阻断主路径)。"""
+        if _STORE is None:
+            return
+
+        async def _put() -> None:
+            try:
+                await _STORE.aput(("threads",), record.thread_id, record.to_dict())
+            except Exception:
+                logger.warning("线程记录持久化失败 thread=%s", record.thread_id, exc_info=True)
+
+        try:
+            import asyncio
+
+            asyncio.create_task(_put(), name=f"persist-thread-{record.thread_id[:8]}")
+        except RuntimeError:
+            pass
 
     # -- 生命周期 ----------------------------------------------------------
 
@@ -117,10 +165,48 @@ class ThreadRegistry:
                 updated_at=updated,
                 state_updated_at=updated,
                 metadata=dict(meta),
-                status="idle",
+                status=_status_from_meta(meta),
             )
+        await self._overlay_store()
         logger.info("runtime: 从 checkpoints 重建线程表 %d 条", len(self._threads))
         return len(self._threads)
+
+    async def _overlay_store(self) -> None:
+        """把 store 里持久化的线程记录叠加到 checkpoint 重建结果上。
+
+        checkpoint metadata 在 run 完成时才写 latest_run_status;run 中途
+        PATCH 的 title/status 只存在于 store。store 记录更新 → 覆盖
+        metadata/timestamps;status 取两者中"更活"的(崩溃瞬间 checkpoint
+        仍标 running → busy 僵死,交 reconcile 清理)。
+        """
+        if _STORE is None:
+            return
+        try:
+            items = await _STORE.asearch(("threads",), limit=1000)
+            loaded = 0
+            for item in items:
+                value = getattr(item, "value", None) or {}
+                rec = ThreadRecord(
+                    thread_id=str(value.get("thread_id") or item.key),
+                    created_at=str(value.get("created_at") or ""),
+                    updated_at=str(value.get("updated_at") or ""),
+                    state_updated_at=str(value.get("state_updated_at") or ""),
+                    metadata=dict(value.get("metadata") or {}),
+                    status=str(value.get("status") or "idle"),
+                    config=dict(value.get("config") or {}),
+                )
+                existing = self._threads.get(rec.thread_id)
+                if existing is not None:
+                    rec.created_at = existing.created_at or rec.created_at
+                # status 从 store 记录的 metadata 推导(与 inmem 一致:
+                # 崩溃瞬间 status=busy 的僵死线程 → reconcile 清理)
+                rec.status = _status_from_meta(rec.metadata)
+                self._threads[rec.thread_id] = rec
+                loaded += 1
+            if loaded:
+                logger.info("runtime: store 叠加线程记录 %d 条", loaded)
+        except Exception:
+            logger.warning("store 线程记录叠加失败", exc_info=True)
 
     # -- 查询 --------------------------------------------------------------
 
@@ -150,6 +236,7 @@ class ThreadRegistry:
             status="idle",
         )
         self._threads[thread_id] = record
+        self._persist(record)
         return record
 
     def patch_metadata(
@@ -161,22 +248,39 @@ class ThreadRegistry:
         if record is None:
             return None
         record.metadata.update(metadata)
+        if isinstance(metadata.get("status"), str) and metadata["status"]:
+            record.status = metadata["status"]
         record.updated_at = _utcnow()
+        self._persist(record)
         return record
 
     def delete(self, thread_id: str) -> None:
         self._threads.pop(thread_id, None)
+        if _STORE is not None:
+            try:
+                import asyncio
+
+                _STORE_ = _STORE
+                asyncio.create_task(
+                    _STORE_.adelete(("threads",), thread_id),
+                    name=f"delete-thread-{thread_id[:8]}",
+                )
+            except RuntimeError:
+                pass
 
     def touch_state(self, thread_id: str) -> None:
         record = self._threads.get(thread_id)
         if record is not None:
             record.state_updated_at = _utcnow()
             record.updated_at = _utcnow()
+            self._persist(record)
 
     def set_status(self, thread_id: str, status: str) -> None:
         record = self._threads.get(thread_id)
         if record is not None:
             record.status = status
+            record.updated_at = _utcnow()
+            self._persist(record)
 
 
 async def _connect(uri: str):
