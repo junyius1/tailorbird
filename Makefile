@@ -2,12 +2,10 @@
 #
 # 双进程拓扑(推荐,与本 Makefile 对齐):
 #   浏览器 :3002 (UI) --/dashboard/api--> :8002 (dashboard 服务器, agent.webapp:app)
-#                                              --bearer+身份头--> :2026 (运行时, langgraph dev, 挂载同 app)
-#   运行时 :2026 自身也挂载了同一份 dashboard app(单进程形态可用,同端口直连)。
+#                                              --bearer+身份头--> :2026 (自研运行时 agent.runtime)
 #
 # 端口可用环境变量覆盖:RUNTIME_PORT / DASHBOARD_PORT / UI_PORT。
 PY := .venv/bin/python
-LG := .venv/bin/langgraph
 
 RUNTIME_PORT ?= 2026
 DASHBOARD_PORT ?= 8002
@@ -23,10 +21,10 @@ bootstrap:
 install: bootstrap
 	uv sync
 
-## 运行时:langgraph dev(:2026,inmem 运行时 + 两张图 + 挂载 dashboard app + 进程内 loopback webhook)
-## 预置 LANGGRAPH_URL 指向自身端口:同进程 dashboard 代理必须打到同端口(否则 CLI 默认会指向 2024)
+## 运行时:自研 FastAPI 进程(:2026,agent.runtime)
+## 预置 LANGGRAPH_URL 指向自身端口:dashboard 代理 / 进程内 get_client 都打到该端口
 runtime:
-	LANGGRAPH_URL=http://localhost:$(RUNTIME_PORT) LANGGRAPH_PORT=$(RUNTIME_PORT) $(LG) dev --no-reload --port $(RUNTIME_PORT)
+	RUNTIME_PORT=$(RUNTIME_PORT) LANGGRAPH_URL=http://localhost:$(RUNTIME_PORT) $(PY) -m agent.runtime
 
 ## dashboard 服务器:独立 uvicorn 进程(:8002),浏览器只连它;内部以复合 bearer 调运行时
 ## .env 由 app 自行 load_dotenv 加载;LANGGRAPH_URL 指向运行时端口
@@ -46,4 +44,4 @@ all:
 	$(MAKE) runtime & $(MAKE) dashboard & $(MAKE) ui
 
 stop:
-	@echo "kill 各端口的 langgraph / uvicorn / vite 进程"
+	@echo "kill 各端口的 uvicorn(agent.runtime) / uvicorn(webapp) / vite 进程"

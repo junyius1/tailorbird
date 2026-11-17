@@ -6,11 +6,22 @@
 要点:
 - 容器名 ``oswe-sbx-<thread_id 前 12 位>``;已存在且存活 → 复用;
   已删除 → ``SandboxGoneError``(调用方重建);不存在 → ``docker create``。
-- ``-v <宿主仓库绝对路径>:/workspace/<repo>``(bind mount,git 对象库共享宿主);
+- 仓库 bind mount(git 对象库共享宿主):**路径仓库**(UI 按路径添加,
+  ``repo.local_path``)= **同路径挂载**——宿主路径在容器内挂到**原路径**
+  (如 ``/mnt/D/.../code_graphrag`` 挂到容器内 ``/mnt/D/.../code_graphrag``),
+  用户消息里的宿主路径在沙箱内直接可用;env 映射/默认仓库保持
+  ``/workspace/<repo>`` 挂载;
   ``-v <线程 .gitconfig-sandbox>:/workspace/.gitconfig-sandbox:ro`` +
   ``GIT_CONFIG_GLOBAL=/workspace/.gitconfig-sandbox`` → commit 作者 = 线程 owner 的 git 身份。
 - 命令执行 = ``docker exec -i -w /workspace/<repo> <容器> sh -lc <cmd>``;
+- 文件/搜索工具(继承自 ``BaseSandbox``)在**容器路径空间**工作
+  (``/workspace/<repo>/...``),``upload_files``/``download_files`` 把容器路径
+  映射到 bind mount 宿主路径落盘(零拷贝),命令仍走 docker exec。
   超时 = SIGTERM/SIGKILL 该 exec 进程(不杀容器)。
+- ``DOCKER_SANDBOX_EXTRA_MOUNTS``(逗号分隔,可选)把宿主任意路径挂进容器:
+  每项 ``宿主路径:容器内路径[:ro]``,宿主路径支持 ``~`` 展开,缺省只读;
+  例 ``~/Downloads:/host/downloads:/root:/host/root``。仅对新创建的容器
+  生效;已存在容器复用原挂载,改 env 后需删线程重建容器。
 - **不挂** Docker socket、**不注入**任何 API key / GitHub token。
 - run 结束**不销毁**(线程复用);删线程时 best-effort ``docker rm -f``。
 """
@@ -29,6 +40,7 @@ from deepagents.backends.protocol import (
     FileDownloadResponse,
     FileUploadResponse,
 )
+from deepagents.backends.sandbox import BaseSandbox
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +54,10 @@ _GITCONFIG_PATH = "/workspace/.gitconfig-sandbox"
 _GITCONFIG_ROOT = Path(os.environ.get("DOCKER_SANDBOX_GITCONFIG_DIR", "/tmp/tailorbird-gitconfig"))
 # 默认命令超时(秒)
 _DEFAULT_COMMAND_TIMEOUT = 600
+# 额外宿主挂载的环境变量(逗号分隔:宿主路径:容器内路径[:ro])
+_EXTRA_MOUNTS_ENV = "DOCKER_SANDBOX_EXTRA_MOUNTS"
+# 容器内额外挂载的根目录(避免与 /workspace 及常用路径冲突)
+_EXTRA_MOUNT_ROOT = "/host"
 
 
 class DockerSandboxError(RuntimeError):
@@ -174,11 +190,52 @@ def _read_host_git_identity() -> tuple[str | None, str | None]:
     return None, None
 
 
+def _extra_mounts() -> list[str]:
+    """解析 DOCKER_SANDBOX_EXTRA_MOUNTS → docker ``-v`` 参数字段列表。
+
+    格式:逗号分隔,每项 ``宿主路径:容器内路径[:ro]``。
+    - 宿主路径支持 ``~`` 展开;不存在时自动创建(与 docker 行为一致)。
+    - 容器内路径缺省 = ``/host/<宿主路径绝对形式(去掉前导 /)>``;
+      挂载模式缺省只读(ro),显式 ``:rw`` 才允许容器内写入。
+    配置错误(空项、缺冒号)只告警跳过,不阻断沙箱创建。
+    """
+    raw = os.environ.get(_EXTRA_MOUNTS_ENV, "")
+    volumes: list[str] = []
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        try:
+            parts = entry.split(":")
+            if len(parts) < 2 or not parts[0].strip() or not parts[1].strip():
+                raise ValueError(f"格式应为 宿主路径:容器内路径[:ro],实际为 {entry!r}")
+            host_part = parts[0].strip()
+            container_part = parts[1].strip()
+            mode = ":".join(parts[2:]).strip() if len(parts) > 2 else ""
+            if mode not in ("", "ro", "rw"):
+                raise ValueError(f"挂载模式只支持 ro/rw,实际为 {mode!r}")
+            # 缺省只读;显式 :rw 才允许容器内写入
+            ro_flag = "" if mode == "rw" else ":ro"
+            if not host_part.startswith("/") and not host_part.startswith("~"):
+                raise ValueError(f"宿主路径必须是绝对路径(支持 ~): {host_part!r}")
+            host = str(Path(host_part).expanduser().resolve())
+            if not container_part.startswith("/"):
+                container_part = f"{_EXTRA_MOUNT_ROOT}/{container_part}"
+            Path(host).mkdir(parents=True, exist_ok=True)
+            volumes += ["-v", f"{host}:{container_part}{ro_flag}"]
+        except ValueError as exc:
+            logger.warning("DOCKER_SANDBOX_EXTRA_MOUNTS 项 %r 已忽略: %s", entry, exc)
+    if volumes:
+        logger.info("沙箱额外挂载: %s", " ".join(volumes))
+    return volumes
+
+
 def _repo_mount_point(repo: dict | None) -> tuple[str, str | None]:
     """解析仓库 → (容器内挂载点, 宿主绝对路径)。
 
-    本变体仓库是**本地路径**概念:``repo = {"name": ..., "owner"?: ...}``。
-    宿主路径解析规则(与 utils/repo.py 的 resolve_local_repo 一致):
+    本变体仓库是**本地路径**概念:``repo = {"name": ..., "owner"?: ...,
+    "local_path"?: ...}``。宿主路径解析规则(与 utils/repo.py 一致):
+    - ``local_path``(UI 按路径添加的仓库)→ **同路径挂载**(挂载点 = 宿主路径);
     - REPO_LOCAL_PATHS 环境变量(owner/name 或 name → 宿主绝对路径)显式映射;
     - 否则 ``/workspace/<repo>`` 下自动建目录(git init 由 agent 完成)。
     无仓库时回退 ``/workspace``(宿主 ``LOCAL_SANDBOX_ROOT_DIR/workspace``)。
@@ -190,6 +247,12 @@ def _repo_mount_point(repo: dict | None) -> tuple[str, str | None]:
         root = Path(os.environ.get("LOCAL_SANDBOX_ROOT_DIR", "/tmp/tailorbird-sandboxes"))
         host = root / "workspace"
         return _WORKSPACE_ROOT, str(host)
+    # 路径添加的仓库:local_path **同路径挂载**——容器内挂载点 = 宿主原路径
+    # (用户消息里的宿主路径在沙箱内直接可用;优先级高于 env 映射)
+    local_path = str((repo or {}).get("local_path") or "").strip()
+    if local_path:
+        host = str(Path(local_path).expanduser().resolve())
+        return host, host
     # 显式映射表:owner/name 或 name → 宿主路径
     mapping_raw = os.environ.get("REPO_LOCAL_PATHS", "")
     owner = str((repo or {}).get("owner") or "").strip()
@@ -206,7 +269,7 @@ def _repo_mount_point(repo: dict | None) -> tuple[str, str | None]:
     return f"{_WORKSPACE_ROOT}/{name}", str(host)
 
 
-class DockerSandbox:
+class DockerSandbox(BaseSandbox):
     """本地 Docker 容器沙箱后端(实现 SandboxBackendProtocol)。
 
     文件/搜索操作直接走 bind mount 的宿主路径(零拷贝、快),
@@ -230,7 +293,9 @@ class DockerSandbox:
         self._repo: dict | None = repo
         # 线程 owner(解析 git 身份用)
         self._owner_username: str | None = owner_username
-        # 容器内工作目录 / 宿主仓库路径(纯计算,无 I/O)
+        # 容器内工作目录 / 宿主仓库路径(纯计算,无 I/O)。
+        # 路径仓库(local_path)= 同路径挂载:workdir 即宿主原路径,
+        # 用户消息里的宿主路径在沙箱内直接可用。
         self._workdir, host_path = _repo_mount_point(repo)
         # 宿主仓库目录(bind mount 源);实际 mkdir 在 _prepare_fs 里(线程池)
         self._host_repo: str = host_path or ""
@@ -265,8 +330,22 @@ class DockerSandbox:
         """容器内工作目录(文件相对路径的根)。"""
         return self._workdir
 
+    def _desired_mounts(self) -> set[tuple[str, str]]:
+        """期望的 (Source, Destination) 挂载集合(布局变更检测用)。
+
+        与 ``_create_container`` 一致:仓库挂 ``host:workdir``
+        (路径仓库的 workdir 即宿主原路径)。
+        """
+        if self._host_repo:
+            return {(self._host_repo, self._workdir)}
+        return set()
+
     def _ensure_container(self) -> None:
-        """确保容器存在且运行;不存在则创建,死了则 start,删除则报错。"""
+        """确保容器存在且运行;不存在则创建,死了则 start,删除则报错。
+
+        挂载布局与期望不一致(如路径仓库的同路径挂载策略更新)→ 删除重建:
+        bind mount 在 ``docker create`` 时固定,无法热更新。
+        """
         try:
             state = _container_state(self._container)
         except DockerSandboxError as exc:
@@ -277,7 +356,28 @@ class DockerSandbox:
                 raise
         if state is None:
             self._create_container()
-        elif state == "exited" or state == "created":
+            return
+        # 只比仓库挂载(按宿主 Source 识别),避免 gitconfig/额外挂载干扰
+        try:
+            out = _docker("inspect", "-f", "{{json .Mounts}}", self._container)
+            actual = {
+                (m.get("Source", ""), m.get("Destination", ""))
+                for m in json.loads(out or "[]")
+                if m.get("Source") == self._host_repo
+            }
+        except (DockerSandboxError, ValueError):
+            actual = set()
+        if actual and actual != self._desired_mounts():
+            logger.info(
+                "沙箱 %s 挂载布局变更,重建容器: %s → %s",
+                self._container,
+                sorted(actual),
+                sorted(self._desired_mounts()),
+            )
+            _docker("rm", "-f", self._container, timeout=120)
+            self._create_container()
+            return
+        if state in ("exited", "created"):
             _docker("start", self._container)
         # running/created→started 后无需额外操作
 
@@ -303,12 +403,12 @@ class DockerSandbox:
             "-w",
             self._workdir,
         ]
-        # 仓库 bind mount(共享 git 对象库);宿主目录必须存在
+        # 仓库 bind mount(共享 git 对象库);宿主目录必须存在。
+        # 路径仓库的同路径挂载由 _repo_mount_point 给出(workdir=宿主原路径)。
         if self._host_repo:
-            args += [
-                "-v",
-                f"{self._host_repo}:{self._workdir}",
-            ]
+            args += ["-v", f"{self._host_repo}:{self._workdir}"]
+        # 额外宿主挂载(DOCKER_SANDBOX_EXTRA_MOUNTS;缺省只读)
+        args += _extra_mounts()
         # 网络:bridge(默认)或 none(断网)
         if network == "none":
             args += ["--network", "none"]
@@ -405,10 +505,30 @@ class DockerSandbox:
     # ---- 文件操作(走 bind mount 的宿主路径直读,零拷贝)------------------
 
     def _host_path_for(self, path: str) -> Path:
-        """容器内相对/绝对路径 → 宿主路径(相对路径挂在仓库目录下)。"""
+        """容器路径 → 宿主路径(upload_files/download_files/delete 用)。
+
+        ``BaseSandbox`` 的文件方法传入的是**容器绝对路径**(如
+        ``/workspace/<repo>/x.py``),而仓库是 bind mount:容器里
+        ``<workdir>/...`` 对应宿主的 ``self._host_repo/...``。因此:
+        - 无仓库回退(容器根 = /workspace):宿主根 =
+          ``LOCAL_SANDBOX_ROOT_DIR/workspace``(与 ``_repo_mount_point`` 一致);
+        - 有仓库:``workdir`` 前缀替换为宿主仓库路径。
+        相对路径与容器根内其它路径(如 ``/tmp``)按原样挂到对应宿主根下。
+        """
         cleaned = str(path).lstrip("/")
         if not self._host_repo:
-            return Path(self._workdir) / cleaned
+            root = Path(
+                os.environ.get("LOCAL_SANDBOX_ROOT_DIR", "/tmp/tailorbird-sandboxes")
+            ) / "workspace"
+            return root / cleaned
+        wd = self._workdir.lstrip("/")
+        if not cleaned:
+            return Path(self._host_repo)
+        if cleaned == wd:
+            return Path(self._host_repo)
+        if cleaned.startswith(wd + "/"):
+            return Path(self._host_repo) / cleaned[len(wd) + 1 :]
+        # 容器根内、仓库挂载之外的路径(如 /tmp):挂到宿主仓库根下尽力映射
         return Path(self._host_repo) / cleaned
 
     def upload_files(
@@ -505,6 +625,8 @@ def validate_docker_startup_config() -> None:
     image = os.environ.get("DOCKER_SANDBOX_IMAGE", "python:3.12-slim")
     if not image:
         raise RuntimeError("DOCKER_SANDBOX_IMAGE 不能为空")
+    # 额外挂载:启动时解析校验(配置错误尽早暴露;坏项只告警不阻断)
+    _extra_mounts()
 
 
 async def create_docker_sandbox(

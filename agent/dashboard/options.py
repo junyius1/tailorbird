@@ -45,6 +45,29 @@ def _cloud_model_entries() -> list[dict[str, Any]]:
     return entries
 
 
+# 本地变体无环境库(对照 open-swe 的 environments store);
+# UI 仅在有 ≥2 个环境时渲染选择器,单 default 即"无需选择",且
+# ``/dashboard/api/environments/options`` 必须存在(前端启动即拉)。
+DEFAULT_ENVIRONMENT_SLUG = "default"
+
+
+@router.get("/environments/options")
+async def get_environment_options(
+    user: dict[str, Any] = Depends(require_session),
+) -> dict[str, Any]:
+    """可选环境列表(本地变体固定单一 default)。"""
+    return {
+        "environments": [
+            {
+                "slug": DEFAULT_ENVIRONMENT_SLUG,
+                "name": "默认环境",
+                "has_snapshot": False,
+            }
+        ],
+        "default_slug": DEFAULT_ENVIRONMENT_SLUG,
+    }
+
+
 @router.get("/options")
 async def get_options(user: dict[str, Any] = Depends(require_session)) -> dict[str, Any]:
     """模型/effort 下拉列表。无可用模型 → 200 空数组(前端显示"未配置模型")。

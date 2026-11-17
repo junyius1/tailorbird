@@ -85,6 +85,12 @@ async def ensure_sandbox_for_thread(
     """
     cfg = (config or {}).get("configurable") or {}
     repo = repo if repo is not None else cfg.get("repo")
+    # 字符串仓库(full_name 或本地绝对路径)归一化为 dict;路径仓库带
+    # local_path,沙箱挂载直达该目录(§11)
+    if isinstance(repo, str):
+        from .utils.repo import normalize_repo_meta
+
+        repo = normalize_repo_meta(repo)
     if not isinstance(repo, dict):
         repo = None
     owner_username = owner_username or cfg.get("local_user")

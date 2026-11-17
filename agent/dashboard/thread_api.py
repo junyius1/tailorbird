@@ -26,6 +26,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from ..utils.repo import normalize_repo_meta, repo_meta_to_full_name
 from ..utils.timing import server_timing_header
 from .auth import require_session, require_same_origin_for_mutations
 from .runtime_client import langgraph_client, raw_httpx_headers, runtime_url
@@ -115,11 +116,15 @@ async def _get_thread_or_404(
 def _thread_summary(thread: dict[str, Any], user: dict[str, Any] | None = None) -> dict[str, Any]:
     """Thread 对象 → ThreadListItem(列表/详情元素结构)。
 
-    字段:``id, title, repo, branch, model, effort, planMode, planStatus,
-    source, threadCategory, triggerKind, status, viewed, viewedAt,
-    createdAt, updatedAt, lastUserMessage?``。
+    字段:``id, title, repo, repoFullName, branch, model, effort, planMode,
+    planStatus, source, threadCategory, triggerKind, status, viewed,
+    viewedAt, createdAt, updatedAt, lastUserMessage?``。
     """
     metadata = thread.get("metadata") or {}
+    # repo 展示:name = 末段(路径仓库 = 目录名);full_name = owner/name 或路径
+    repo_meta = metadata.get("repo")
+    repo_full = repo_meta_to_full_name(repo_meta)
+    repo_name = repo_full.rsplit("/", 1)[-1] if repo_full else ""
     # 展示态:由 latest_run_status 推导
     latest = metadata.get("latest_run_status")
     if latest in ("pending", "running"):
@@ -133,7 +138,8 @@ def _thread_summary(thread: dict[str, Any], user: dict[str, Any] | None = None) 
     return {
         "id": thread.get("thread_id"),
         "title": metadata.get("title") or "(未命名)",
-        "repo": metadata.get("repo"),
+        "repo": repo_name,
+        "repoFullName": repo_full,
         "branch": metadata.get("branch"),
         "model": metadata.get("model"),
         "effort": metadata.get("effort"),
@@ -150,6 +156,9 @@ def _thread_summary(thread: dict[str, Any], user: dict[str, Any] | None = None) 
         "createdAt": thread.get("created_at"),
         "updatedAt": thread.get("updated_at"),
         "lastUserMessage": metadata.get("last_user_message"),
+        # transcript 由客户端从 SDK 水合(GET …/state → stream.messages);
+        # summary 只带元数据,但前端 AgentThread 类型要求 messages 存在(上游同此)。
+        "messages": [],
         "isOwner": bool(user and (metadata.get("local_user") in (None, user["sub"]) or _is_admin(user))),
     }
 
@@ -530,9 +539,17 @@ _EVENT_STREAMING_V2_KEY = "__event_streaming_v2"
 
 
 def _enrich_run_start(
-    params: dict[str, Any], user: dict[str, Any], thread_id: str, creating: bool
+    params: dict[str, Any],
+    user: dict[str, Any],
+    thread_id: str,
+    creating: bool,
+    existing_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """富化 run.start:注入 configurable + metadata(source=dashboard)。"""
+    """富化 run.start:注入 configurable + metadata(source=dashboard)。
+
+    已有线程且本次未带 repo 时,回退线程创建时的 ``metadata.repo``
+    (沙箱缓存丢失重建时仍能挂回同一仓库)。
+    """
     import uuid as _uuid
 
     params = dict(params)
@@ -541,6 +558,14 @@ def _enrich_run_start(
     # 触发源 = dashboard(§15.4.3)
     configurable["source"] = "dashboard"
     configurable["local_user"] = user["sub"]
+    # repo 归一化:UI 传 full_name/本地路径字符串 → dict 元信息
+    # (路径仓库带 local_path,沙箱挂载直达该目录;§11)
+    repo_meta = normalize_repo_meta(configurable.get("repo"))
+    if repo_meta is None and not creating:
+        stored = (existing_metadata or {}).get("repo")
+        repo_meta = normalize_repo_meta(stored if isinstance(stored, dict) else None)
+    if repo_meta is not None:
+        configurable["repo"] = repo_meta
     # prepare_run_id:关联 PrepareRun 中间件(每次 run 新 uuid)
     configurable.setdefault("prepare_run_id", _uuid.uuid4().hex)
     # 必须置位:v3 流协议标记
@@ -561,6 +586,8 @@ def _enrich_run_start(
         metadata.setdefault("local_user", user["sub"])
         metadata.setdefault("thread_category", "interactive")
         metadata.setdefault("trigger_kind", "user")
+        # 缺省未解决:侧栏/列表按 resolved 分组,缺 key 的线程两边都查不到
+        metadata.setdefault("resolved", False)
         # 标题:首条消息前 80 字符
         title = ""
         input_messages = (params.get("input") or {}).get("messages") or []
@@ -579,7 +606,11 @@ def _enrich_run_start(
         slug = re.sub(r"[^a-z0-9]+", "-", (title or "thread").lower()).strip("-")[:40] or "thread"
         metadata.setdefault("branch", f"local/{slug}")
         metadata.setdefault("base_branch", "main")
+        # 本次显式选择了仓库(含"添加路径")→ 覆盖默认
+        if repo_meta is not None:
+            metadata["repo"] = repo_meta
         params["metadata"] = metadata
+    # 已有线程:configurable 已归一化(或回退 metadata.repo),metadata 保持创建时形态
     return params
 
 
@@ -617,6 +648,7 @@ async def proxy_commands(
     client = _client_for(user)
     # 线程是否存在(run.start 可 lazy 建)
     creating = False
+    existing_metadata: dict[str, Any] = {}
     try:
         existing = await client.threads.get(thread_id)
         if existing is None:
@@ -626,6 +658,7 @@ async def proxy_commands(
         else:
             # 归属判断(非 run.start 必须已存在且可访问)
             metadata = existing.get("metadata") or {}
+            existing_metadata = dict(metadata)
             owner = metadata.get("local_user")
             if owner and not _is_admin(user) and owner != user["sub"]:
                 raise HTTPException(status_code=404, detail="not found")
@@ -639,7 +672,26 @@ async def proxy_commands(
         else:
             raise HTTPException(status_code=502, detail="runtime unreachable")
     if method == "run.start":
-        params = _enrich_run_start(params, user, thread_id, creating)
+        params = _enrich_run_start(
+            params, user, thread_id, creating, existing_metadata
+        )
+        if creating:
+            # 真正 lazy 建线程:运行时 commands 端点要求线程已存在,不在这里建
+            # → run.start 报 thread not found → 前端死循环轮询 404。
+            # 建线程时把 _enrich_run_start 已组好的全量 metadata(owner/title/
+            # repo/resolved)一并打进去,否则记录缺 local_user → 归属过滤与
+            # 列表都查不到。if_exists=do_nothing 规避 get/create 之间被并发建
+            # 的 409(与上游 open-swe 首 run.start 建线程记录同形)。
+            try:
+                await client.threads.create(
+                    thread_id=thread_id,
+                    metadata=params.get("metadata"),
+                    if_exists="do_nothing",
+                )
+            except Exception:  # noqa: BLE001
+                raise HTTPException(
+                    status_code=502, detail="runtime unreachable"
+                )
     # 透传到运行时同名端点(SDK 无 commands 命名空间,走 raw httpx + 身份头)
     import httpx
 
@@ -973,33 +1025,39 @@ async def _sse_upstream(
                     return
 
             disconnect_task = asyncio.ensure_future(_watch_disconnect())
-            # 逐 chunk 读,受空闲/存活上限约束
-            idle_deadline = asyncio.get_event_loop().time() + _STREAM_IDLE_TIMEOUT
+            # 逐 chunk 读,受空闲/存活上限约束。
+            # 注意:aiter_bytes() 只能调用一次(httpx 流式响应一次性消费,
+            # 二次调用抛 StreamConsumed),必须在循环外创建迭代器;超时/断连
+            # 通过取消 read_task 实现,而不是丢弃半消费的迭代器。
+            chunks = response.aiter_bytes()
             while True:
                 remaining_lifetime = (
                     deadline_start + _STREAM_MAX_LIFETIME - asyncio.get_event_loop().time()
                 )
                 budget = max(0.1, min(_STREAM_IDLE_TIMEOUT, remaining_lifetime))
+                read_task = asyncio.ensure_future(anext(chunks))
                 try:
-                    chunk = await asyncio.wait_for(
-                        anext(response.aiter_bytes()), timeout=budget
-                    )
-                except (StopAsyncIteration,):
+                    chunk = await asyncio.wait_for(read_task, timeout=budget)
+                except StopAsyncIteration:
                     break  # 上游正常结束(run 终止帧后关流)
                 except (TimeoutError, asyncio.TimeoutError):
                     break  # 空闲/存活超时
+                except httpx.HTTPError as exc:
+                    read_task.cancel()
+                    yield f"event: error\ndata: {json.dumps({'detail': str(exc)[:300]})}\n\n"
+                    break
                 if not chunk:
                     break
-                idle_deadline = asyncio.get_event_loop().time() + _STREAM_IDLE_TIMEOUT
                 yield chunk
                 # 客户端断开检查
                 if disconnect_task.done():
+                    read_task.cancel()
                     break
         except httpx.HTTPError as exc:
             yield f"event: error\ndata: {json.dumps({'detail': str(exc)[:300]})}\n\n"
         finally:
             # 客户端断开/超时/结束:必须取消并释放上游订阅(否则泄漏事件循环)
-            for task in (disconnect_task,):
+            for task in (read_task, disconnect_task):
                 if task is not None and not task.done():
                     task.cancel()
                     try:

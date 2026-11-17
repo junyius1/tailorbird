@@ -56,7 +56,11 @@ SHARED_BASE = """你是 **Tailorbird**,一个自托管编程 agent,构建于 Lan
 
 WORKING_ENV_SECTION = """### 工作环境
 
-你正在远程 Linux 沙箱 ``{working_dir}`` 中操作——把它作为所有操作的工作目录。沙箱开始时是干净的;仓库已按线程 bind 挂载到该目录(或尚不存在,需你初始化)。"""
+你正在远程 Linux 沙箱 ``{working_dir}`` 中操作——把它作为所有操作的工作目录。沙箱开始时是干净的;线程绑定的仓库已 bind 挂载到该目录(或尚不存在,需你初始化)。{mount_note}"""
+
+# 同路径挂载说明(local_path 路径仓库;宿主路径在容器内原样可用)
+IDENTITY_MOUNT_NOTE = """
+注意:用户消息里的宿主路径 ``{host_path}`` 在沙箱内以**相同路径**挂载,直接可用——**不要**把宿主路径改写为其它容器路径,也不要因 ``ls`` 该路径成功就认为没挂载。"""
 
 # 仓库准备段:本地路径语义,无 clone/身份步骤(§3.5/§11)
 REPO_SETUP_SECTION = """---
@@ -166,6 +170,7 @@ def construct_system_prompt(
     source: str = "web",
     plan_mode: bool = False,
     plan_url: str = "",
+    mount_note: str = "",
 ) -> str:
     """装配完整系统提示(分段拼接 + <system-instructions> 包裹)。
 
@@ -174,10 +179,13 @@ def construct_system_prompt(
         source: 触发源(web/dashboard/schedule/automation)。
         plan_mode: 是否 plan mode(启用中)。
         plan_url: plan 评审链接(plan_mode 时填充)。
+        mount_note: 挂载映射说明(路径仓库同路径挂载时非空)。
     """
     sections: list[str] = []
     sections.append(SHARED_BASE)
-    sections.append(WORKING_ENV_SECTION.format(working_dir=working_dir))
+    sections.append(
+        WORKING_ENV_SECTION.format(working_dir=working_dir, mount_note=mount_note)
+    )
     sections.append(REPO_SETUP_SECTION)
     sections.append(TASK_EXECUTION_SECTION)
     sections.append(LOCAL_COMMIT_SECTION)
