@@ -182,6 +182,9 @@ async def _build_threaded_agent(config: RunnableConfig, sandbox: SandboxBackendP
             model_id=model_id,
             effort=effort,
             plan_mode=plan_mode,
+            # 沙箱真实工作目录:路径仓库时 = 宿主原路径(同路径挂载),
+            # 进系统提示让模型直接用用户消息里的路径
+            working_dir=getattr(sandbox, "workdir", None),
         ),
     ]
 
