@@ -15,8 +15,7 @@ from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import RunnableConfig
-from langgraph_sdk import get_client
-
+from .dashboard.runtime_client import langgraph_client
 from .dispatch import create_durable_run, dispatch_agent_run
 from .input_messages import RunInput, build_run_input
 
@@ -57,7 +56,7 @@ async def launch_scheduled_agent_run(schedule_id: str) -> dict[str, Any]:
         ``{"status": "launched", "thread_id", "run_id"}`` 或
         ``{"status": "skipped|error", "reason"}``。
     """
-    client = get_client()
+    client = langgraph_client()
     # 读 schedule 记录(store 命名空间 schedules)
     try:
         item = await client.store.get_item(["schedules"], schedule_id)
@@ -139,7 +138,7 @@ async def reconcile_stale_runs() -> dict[str, Any]:
     dev server 重启后,run 会消失但线程仍标 busy;
     本任务把这类线程的展示态修正为 idle(不丢 checkpoint)。
     """
-    client = get_client()
+    client = langgraph_client()
     reconciled = 0
     try:
         # 只查 busy 线程(按 status 过滤;单用户本地,量小)
@@ -181,7 +180,7 @@ async def _launch(state: SchedulerState, config: RunnableConfig) -> dict[str, An
         if isinstance(prompt, str) and prompt.strip():
             local_user = state.get("local_user") or "local-user"
             try:
-                client = get_client()
+                client = langgraph_client()
                 thread = await client.threads.create(
                     metadata={
                         "kind": "agent",

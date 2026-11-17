@@ -15,7 +15,7 @@ import logging
 import os
 from typing import Any
 
-from langgraph_sdk import get_client
+from .dashboard.runtime_client import langgraph_client
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +71,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     if not isinstance(thread_id, str) or not thread_id:
         return {"status": "ignored", "reason": "missing thread_id"}
 
-    client = get_client()
+    client = langgraph_client()
 
     if status == "success":
         # 成功:同步展示态为 idle(best-effort);本变体无 Slack 成本刷新

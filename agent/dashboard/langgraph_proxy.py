@@ -383,6 +383,7 @@ _PROTOCOL_ROUTES: list[tuple[str, str, str]] = [
     ("GET", "/threads/{thread_id}/runs/{run_id}", "lg_run_get"),
     ("POST", "/threads/{thread_id}/runs/{run_id}/cancel", "lg_run_cancel"),
     ("POST", "/threads/{thread_id}/stream/events", "lg_thread_stream_events"),
+    ("POST", "/threads/{thread_id}/commands", "lg_thread_commands"),
     ("GET", "/threads/{thread_id}/stream", "lg_thread_stream_join"),
     ("POST", "/runs/stream", "lg_runs_stream"),
     ("POST", "/runs", "lg_runs_create"),

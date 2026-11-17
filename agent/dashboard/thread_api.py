@@ -675,6 +675,23 @@ async def proxy_commands(
         params = _enrich_run_start(
             params, user, thread_id, creating, existing_metadata
         )
+        if creating:
+            # 真正 lazy 建线程:运行时 commands 端点要求线程已存在,不在这里建
+            # → run.start 报 thread not found → 前端死循环轮询 404。
+            # 建线程时把 _enrich_run_start 已组好的全量 metadata(owner/title/
+            # repo/resolved)一并打进去,否则记录缺 local_user → 归属过滤与
+            # 列表都查不到。if_exists=do_nothing 规避 get/create 之间被并发建
+            # 的 409(与上游 open-swe 首 run.start 建线程记录同形)。
+            try:
+                await client.threads.create(
+                    thread_id=thread_id,
+                    metadata=params.get("metadata"),
+                    if_exists="do_nothing",
+                )
+            except Exception:  # noqa: BLE001
+                raise HTTPException(
+                    status_code=502, detail="runtime unreachable"
+                )
     # 透传到运行时同名端点(SDK 无 commands 命名空间,走 raw httpx + 身份头)
     import httpx
 
