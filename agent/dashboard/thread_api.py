@@ -145,6 +145,7 @@ def _thread_summary(thread: dict[str, Any], user: dict[str, Any] | None = None) 
         "effort": metadata.get("effort"),
         "planMode": bool(metadata.get("plan_mode")),
         "planStatus": metadata.get("plan_status"),
+        "sandboxType": metadata.get("sandbox_type"),
         "source": metadata.get("source") or "web",
         "threadCategory": metadata.get("thread_category") or "interactive",
         "triggerKind": metadata.get("trigger_kind") or "user",
@@ -311,20 +312,74 @@ async def get_thread(
     return summary
 
 
+class SandboxSwitchBody(BaseModel):
+    """沙箱类型切换请求体(线程级默认)。"""
+
+    # docker 或 local
+    type: str
+
+
+@router.post("/threads/{thread_id}/sandbox")
+async def switch_thread_sandbox(
+    thread_id: str, body: SandboxSwitchBody, user: dict[str, Any] = Depends(require_session)
+) -> dict[str, Any]:
+    """设置线程的沙箱 provider 默认并立即停掉当前容器(切换不丢状态)。
+
+    - 线程存在且归属校验(与现有一致,非本人 404);
+    - type 只认 docker/local,否则 422;
+    - 线程有活动 run → 409(运行中不切,下一个 run 生效);
+    - type=docker 且 daemon 不可达 → 503(启动 Docker 或改用 local);
+    - 更新 ``metadata.sandbox_type``(线程默认;run 级 configurable 仍可覆盖);
+    - best-effort ``docker stop`` 该线程容器(容器名按 thread_id 纯计算;
+      下次 run 的 ensure 逻辑见类型不一致 → 停旧 + 按新类型重建,统一布局
+      共用宿主目录,来回切换文件/git 无损)。
+    """
+    from ..utils.sandbox import validate_sandbox_type
+
+    try:
+        sandbox_type = validate_sandbox_type(body.type)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    thread = await _get_thread_or_404(thread_id, user)
+    metadata = thread.get("metadata") or {}
+    if _run_in_flight(thread, metadata):
+        raise HTTPException(status_code=409, detail="thread is running; wait for it to finish")
+    if sandbox_type == "docker":
+        from ..integrations.docker import docker_daemon_available
+
+        if not docker_daemon_available():
+            raise HTTPException(
+                status_code=503,
+                detail="Docker daemon unreachable; start Docker or switch to local",
+            )
+    client = _client_for(user)
+    try:
+        await client.threads.update(thread_id, metadata={"sandbox_type": sandbox_type})
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail="runtime unreachable")
+    # best-effort 停容器(docker 侧省内存;切回时容器还在则复用/重建)
+    from ..integrations.docker import _container_name, _docker
+
+    try:
+        _docker("stop", "-t", "10", _container_name(thread_id), timeout=30)
+    except Exception:  # noqa: BLE001
+        logger.debug("切换沙箱时停止容器失败(best-effort) thread=%s", thread_id, exc_info=True)
+    return {"thread_id": thread_id, "sandbox_type": sandbox_type, "effective": True}
+
+
 @router.delete("/threads/{thread_id}", status_code=204)
 async def delete_thread(
     thread_id: str, user: dict[str, Any] = Depends(require_session)
 ) -> Response:
     """删线程 + 其 checkpoint/流 + llm_reasoning 该线程全部行(不可恢复)。"""
     thread = await _get_thread_or_404(thread_id, user)
-    # best-effort 清理沙箱容器(删线程时)
-    from ..integrations.docker import DockerSandbox, _container_name
+    # best-effort 清理沙箱容器(删线程时;容器名可按 thread_id 纯计算)
+    from ..integrations.docker import _container_name, _docker
 
-    if (os.environ.get("SANDBOX_TYPE", "docker") == "docker"):
-        try:
-            DockerSandbox(thread_id).destroy()
-        except Exception:  # noqa: BLE001
-            logger.debug("删线程时清理沙箱失败(best-effort)", exc_info=True)
+    try:
+        _docker("rm", "-f", _container_name(thread_id), timeout=30)
+    except Exception:  # noqa: BLE001
+        logger.debug("删线程时清理沙箱失败(best-effort)", exc_info=True)
     # 级联删推理行(设计书 §5.2.1)
     from ..reasoning_store import delete_thread as delete_reasoning
 
@@ -341,7 +396,6 @@ async def delete_thread(
         raise HTTPException(status_code=502, detail="runtime unreachable")
     # 失效 state 缓存
     state_cache().invalidate(thread_id)
-    _ = _container_name
     return Response(status_code=204)
 
 
@@ -552,12 +606,27 @@ def _enrich_run_start(
     """
     import uuid as _uuid
 
+    from ..utils.sandbox import validate_sandbox_type
+
     params = dict(params)
     config = dict(params.get("config") or {})
     configurable = dict(config.get("configurable") or {})
     # 触发源 = dashboard(§15.4.3)
     configurable["source"] = "dashboard"
     configurable["local_user"] = user["sub"]
+    # run 级沙箱选择(UI composer;非法值丢弃,由服务端默认兜底)
+    raw_sbx = configurable.get("sandbox_type")
+    if isinstance(raw_sbx, str) and raw_sbx.strip():
+        try:
+            configurable["sandbox_type"] = validate_sandbox_type(raw_sbx)
+        except ValueError:
+            configurable.pop("sandbox_type", None)
+    else:
+        configurable.pop("sandbox_type", None)
+    # 线程级沙箱默认(run 级未设时注入;metadata.sandbox_type 由切换 API 维护)
+    meta_sbx = (existing_metadata or {}).get("sandbox_type")
+    if "sandbox_type" not in configurable and isinstance(meta_sbx, str) and meta_sbx.strip():
+        configurable["sandbox_type"] = meta_sbx.strip()
     # repo 归一化:UI 传 full_name/本地路径字符串 → dict 元信息
     # (路径仓库带 local_path,沙箱挂载直达该目录;§11)
     repo_meta = normalize_repo_meta(configurable.get("repo"))
@@ -609,6 +678,9 @@ def _enrich_run_start(
         # 本次显式选择了仓库(含"添加路径")→ 覆盖默认
         if repo_meta is not None:
             metadata["repo"] = repo_meta
+        # run 级显式选择沙箱 → 同时落为线程默认
+        if configurable.get("sandbox_type"):
+            metadata["sandbox_type"] = configurable["sandbox_type"]
         params["metadata"] = metadata
     # 已有线程:configurable 已归一化(或回退 metadata.repo),metadata 保持创建时形态
     return params
@@ -1157,19 +1229,16 @@ async def get_reasoning_one(
 
 
 def _sandbox_host_repo(thread_id: str, repo: dict | None = None) -> str | None:
-    """线程 → 宿主仓库路径(docker provider 的 bind mount 源)。"""
-    from ..utils.sandbox import sandbox_type
+    """线程 → 宿主仓库路径(统一布局;differ/diff 端点不再关心 provider)。"""
+    from ..sandbox_layout import resolve_thread_layout
 
-    if sandbox_type() == "docker":
-        from ..integrations.docker import _repo_mount_point
-
-        _workdir, host = _repo_mount_point(repo)
-        return host
-    if sandbox_type() == "local":
-        from ..integrations.local import _thread_root
-
-        return _thread_root(thread_id)
-    return None
+    if repo is not None and not isinstance(repo, dict):
+        repo = normalize_repo_meta(repo, create=False)
+    try:
+        return resolve_thread_layout(thread_id, repo).repo_host
+    except Exception:  # noqa: BLE001
+        logger.debug("线程布局解析失败 thread=%s", thread_id, exc_info=True)
+        return None
 
 
 def _run_git(repo_dir: str, *args: str) -> str:

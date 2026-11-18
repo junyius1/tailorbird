@@ -132,6 +132,9 @@ export function useSubmitAgentMessage(threadId: string) {
       if (vars.plan_mode) {
         configurable.plan_mode = true
       }
+      if (vars.sandbox_type) {
+        configurable.sandbox_type = vars.sandbox_type
+      }
       const config =
         Object.keys(configurable).length > 0 ? { configurable } : undefined
 

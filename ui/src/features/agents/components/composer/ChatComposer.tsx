@@ -19,6 +19,7 @@ import {
 } from "./ComposerPromptEditor"
 import { ContextWindowMeter } from "./ContextWindowMeter"
 import { EnvironmentSelector } from "./EnvironmentSelector"
+import { SandboxSelector, type SandboxType } from "./SandboxSelector"
 import {
   LocalBranchSelector,
   LocalProjectSelector,
@@ -130,6 +131,9 @@ export interface ChatComposerProps {
   environments?: Array<EnvironmentOption>
   selectedEnvironment?: string | null
   onEnvironmentChange?: (slug: string | null) => void
+  /** Per-run sandbox provider ("default" = follow server config). Omit to hide the control. */
+  sandboxType?: "default" | SandboxType
+  onSandboxTypeChange?: (next: "default" | SandboxType) => void
   /** Paths offered by `@` autocomplete — in a thread, the files the agent has touched. */
   mentionPaths?: Array<string>
   skills?: Array<Skill>
@@ -252,6 +256,8 @@ export const ChatComposer = memo(function ChatComposer({
   environments = [],
   selectedEnvironment = null,
   onEnvironmentChange,
+  sandboxType = "default",
+  onSandboxTypeChange,
   mentionPaths = [],
   skills = [],
   contextUsage,
@@ -667,7 +673,7 @@ export const ChatComposer = memo(function ChatComposer({
         compact ? "max-w-none" : "max-w-2xl"
       )}
     >
-      {(onRepoChange || onRunTargetChange || onEnvironmentChange) && (
+      {(onRepoChange || onRunTargetChange || onEnvironmentChange || onSandboxTypeChange) && (
         <div className="mb-2 flex min-w-0 flex-wrap items-center gap-2 px-1 text-xs">
           {runTarget && onRunTargetChange && (
             <RunTargetSelector onChange={onRunTargetChange} value={runTarget} />
@@ -686,6 +692,12 @@ export const ChatComposer = memo(function ChatComposer({
               environments={environments}
               selectedSlug={selectedEnvironment}
               onChange={onEnvironmentChange}
+            />
+          )}
+          {runTarget !== "local" && onSandboxTypeChange && (
+            <SandboxSelector
+              value={sandboxType}
+              onChange={onSandboxTypeChange}
             />
           )}
           {runTarget === "local" &&

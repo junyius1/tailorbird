@@ -320,6 +320,7 @@ export interface AgentThread {
   effort?: string | null
   planMode?: boolean
   planStatus?: string | null
+  sandboxType?: "docker" | "local" | null
   adminThread?: boolean
   source?: AgentSource
   origin?: AgentSource | string

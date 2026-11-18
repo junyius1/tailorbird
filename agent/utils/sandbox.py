@@ -30,11 +30,42 @@ class SandboxGoneError(RuntimeError):
     """
 
 
-# 唯一保留的两个 provider(docker = 推荐;local = 裸开发回退)
+# 保留的两个 provider(docker = 推荐;local = 无 Docker 裸开发)
 SANDBOX_FACTORIES: dict[str, tuple[str, str]] = {
     "docker": ("agent.integrations.docker", "create_docker_sandbox"),
     "local": ("agent.integrations.local", "create_local_sandbox"),
 }
+
+
+def _supported_types() -> str:
+    return ", ".join(sorted(SANDBOX_FACTORIES))
+
+
+def validate_sandbox_type(value: object) -> str:
+    """校验沙箱类型值(只认 docker/local;非法抛 ValueError)。"""
+    v = str(value or "").strip().lower()
+    if v not in SANDBOX_FACTORIES:
+        raise ValueError(f"Invalid sandbox type: {value!r}. Supported types: {_supported_types()}")
+    return v
+
+
+def resolve_sandbox_type(
+    configurable: dict | None = None,
+    metadata: dict | None = None,
+) -> str:
+    """解析生效的沙箱类型。
+
+    优先级:run 级 ``configurable.sandbox_type`` > 线程级
+    ``metadata.sandbox_type`` > env ``SANDBOX_TYPE``(缺省 docker)。
+    每层缺省/空串视为未设置;非法值抛 ValueError(调用方转 422/run 错误)。
+    """
+    for source in (configurable, metadata):
+        if not isinstance(source, dict):
+            continue
+        value = source.get("sandbox_type")
+        if isinstance(value, str) and value.strip():
+            return validate_sandbox_type(value)
+    return validate_sandbox_type(os.getenv("SANDBOX_TYPE", "docker"))
 
 
 def _load_sandbox_factory(sandbox_type: str) -> SandboxFactory:
@@ -51,7 +82,7 @@ def _load_sandbox_factory(sandbox_type: str) -> SandboxFactory:
 
 
 def sandbox_type() -> str:
-    """当前配置的沙箱类型(缺省 docker)。"""
+    """当前配置的全局沙箱类型(缺省 docker;线程/run 级可覆盖,见 resolve_sandbox_type)。"""
     return os.getenv("SANDBOX_TYPE", "docker")
 
 
@@ -60,19 +91,21 @@ async def create_sandbox(
     *,
     repo: dict | None = None,
     owner_username: str | None = None,
+    sandbox_type: str | None = None,
 ) -> "SandboxBackendProtocol":
-    """按 ``SANDBOX_TYPE`` 创建或重连沙箱。
+    """创建或重连沙箱(按显式类型或 ``SANDBOX_TYPE`` env)。
 
     参数:
         sandbox_id: 线程 id(容器/目录命名键);docker 必填。
-        repo: 仓库元信息(解析宿主挂载路径,本地路径语义)。
+        repo: 仓库元信息(统一布局解析,本地路径语义)。
         owner_username: 线程 owner(docker 沙箱的 commit 作者身份)。
+        sandbox_type: 显式类型("docker"/"local");缺省读 env。
     """
-    active = sandbox_type()
+    active = validate_sandbox_type(sandbox_type or os.getenv("SANDBOX_TYPE", "docker"))
     factory = _load_sandbox_factory(active)
-    kwargs: dict[str, Any] = {}
+    kwargs: dict[str, Any] = {"repo": repo}
     if active == "docker":
-        kwargs = {"repo": repo, "owner_username": owner_username}
+        kwargs["owner_username"] = owner_username
     if inspect.iscoroutinefunction(factory):
         return await factory(sandbox_id, **kwargs)
     # 同步工厂走 to_thread(不阻塞单事件循环)
@@ -80,7 +113,11 @@ async def create_sandbox(
 
 
 def validate_sandbox_startup_config() -> None:
-    """启动时校验当前 provider 配置(失败拒启)。"""
+    """启动时校验当前 provider 配置。
+
+    docker:daemon 不可达仅告警(不拒启;无 Docker 环境可按线程/run 用 local);
+    镜像名空拒启(配置性错误)。local:根目录缺省告警。
+    """
     active = sandbox_type()
     if active == "docker":
         from agent.integrations.docker import validate_docker_startup_config
