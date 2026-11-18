@@ -728,6 +728,7 @@ export interface SendAgentMessageVariables {
   model_id?: string | null
   effort?: string | null
   plan_mode?: boolean
+  sandbox_type?: "docker" | "local" | null
 }
 
 export function useCancelAgentThread(threadId: string) {

@@ -325,6 +325,10 @@ class ThreadRunEngine:
         configurable["thread_id"] = self.thread_id
         configurable["local_user"] = configurable.get("local_user") or user
         configurable.setdefault("source", source)
+        # 线程级沙箱默认(run 级 configurable.sandbox_type 优先)
+        meta_sandbox = (record.metadata or {}).get("sandbox_type")
+        if isinstance(meta_sandbox, str) and meta_sandbox.strip():
+            configurable.setdefault("sandbox_type", meta_sandbox.strip())
         run_config, run_control = build_run_config(
             self.thread_id,
             configurable,

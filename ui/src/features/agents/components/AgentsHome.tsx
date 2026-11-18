@@ -72,6 +72,10 @@ export function AgentsHome() {
   }
   const [planMode, setPlanMode] = useState(false)
   const [adminThread, setAdminThread] = useState(false)
+  // Per-run sandbox provider ("default" = follow server SANDBOX_TYPE)
+  const [sandboxType, setSandboxType] = useState<
+    "default" | "docker" | "local"
+  >("default")
   const cloudEnabled = Boolean(session.data)
   const environmentOptions = useEnvironmentOptions(cloudEnabled)
   const environments = environmentOptions.data?.environments ?? []
@@ -327,6 +331,7 @@ export function AgentsHome() {
     if (planMode) configurable.plan_mode = true
     if (adminThread) configurable.admin_thread = true
     if (selectedEnvironment) configurable.environment = selectedEnvironment
+    if (sandboxType !== "default") configurable.sandbox_type = sandboxType
 
     await stream
       .submit(
@@ -391,6 +396,10 @@ export function AgentsHome() {
             selectedEnvironment={selectedEnvironment}
             onEnvironmentChange={
               runTarget === "cloud" ? setEnvironmentOverride : undefined
+            }
+            sandboxType={runTarget === "cloud" ? sandboxType : "default"}
+            onSandboxTypeChange={
+              runTarget === "cloud" ? setSandboxType : undefined
             }
             adminThread={adminThread}
             onAdminThreadChange={

@@ -94,6 +94,14 @@ export function AgentThreadView({
   const [planFeedbackPending, setPlanFeedbackPending] =
     useState(autoFocusComposer)
   const activePlanMode = planMode ?? thread.planMode ?? false
+  // 线程级沙箱默认(切换 API 维护;per-run 选择可覆盖)
+  const [sandboxType, setSandboxType] = useState<
+    "default" | "docker" | "local"
+  >(() =>
+    thread.sandboxType === "docker" || thread.sandboxType === "local"
+      ? thread.sandboxType
+      : "default"
+  )
   const activeModel = models.find(
     (model) => model.id === activeSelection?.modelId
   )
@@ -106,6 +114,7 @@ export function AgentThreadView({
         model_id: activeSelection?.modelId ?? null,
         effort: activeSelection?.effort ?? null,
         plan_mode: activePlanMode,
+        sandbox_type: sandboxType === "default" ? null : sandboxType,
       })
       setPlanFeedbackPending(false)
     },
@@ -114,6 +123,7 @@ export function AgentThreadView({
       activeSelection?.effort,
       activeSelection?.modelId,
       planFeedbackPending,
+      sandboxType,
       sendMessage,
       thread.id,
     ]
@@ -315,6 +325,8 @@ export function AgentThreadView({
                   onSelectionChange={setSelection}
                   planMode={activePlanMode}
                   onPlanModeChange={setPlanMode}
+                  sandboxType={sandboxType}
+                  onSandboxTypeChange={setSandboxType}
                   mentionPaths={mentionPaths}
                   skills={skills.data}
                   contextUsage={{
@@ -379,6 +391,8 @@ export function AgentThreadView({
                 models={models}
                 selection={activeSelection}
                 onSelectionChange={setSelection}
+                sandboxType={sandboxType}
+                onSandboxTypeChange={setSandboxType}
                 skills={skills.data}
                 contextUsage={{
                   usedTokens,
