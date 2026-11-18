@@ -15,8 +15,7 @@ from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import RunnableConfig
-from langgraph_sdk import get_client
-
+from .dashboard.runtime_client import langgraph_client
 from .dispatch import create_durable_run, dispatch_agent_run
 from .input_messages import RunInput, build_run_input
 
@@ -57,7 +56,7 @@ async def launch_scheduled_agent_run(schedule_id: str) -> dict[str, Any]:
         ``{"status": "launched", "thread_id", "run_id"}`` 或
         ``{"status": "skipped|error", "reason"}``。
     """
-    client = get_client()
+    client = langgraph_client()
     # 读 schedule 记录(store 命名空间 schedules)
     try:
         item = await client.store.get_item(["schedules"], schedule_id)
@@ -82,6 +81,7 @@ async def launch_scheduled_agent_run(schedule_id: str) -> dict[str, Any]:
         "local_user": owner,
         "thread_category": "interactive",
         "trigger_kind": "schedule",
+        "resolved": False,
         "automation_id": schedule_id,
         "automation_name": name,
         "title": f"[定时] {name}",
@@ -95,30 +95,34 @@ async def launch_scheduled_agent_run(schedule_id: str) -> dict[str, Any]:
         return {"status": "error", "reason": "thread create failed"}
     thread_id = thread.get("thread_id")
 
-    # 解析仓库自由文本 → metadata(可选)
+    # 解析仓库自由文本 → metadata(可选);支持 full_name 与本地绝对路径
+    repo_meta = None
     if value.get("repo"):
-        from .utils.repo import extract_repo_from_text
+        from .utils.repo import normalize_repo_meta
 
-        repo = extract_repo_from_text(str(value["repo"]))
-        if repo:
-            metadata["repo"] = repo
+        repo_meta = normalize_repo_meta(str(value["repo"]))
+        if repo_meta:
+            metadata["repo"] = repo_meta
             try:
-                await client.threads.update(thread_id, metadata={"repo": repo})
+                await client.threads.update(thread_id, metadata={"repo": repo_meta})
             except Exception:  # noqa: BLE001
                 pass
 
     # 分发 durable run(source=schedule)
+    schedule_configurable = {
+        "source": "schedule",
+        "local_user": owner,
+        "model": value.get("model_id"),
+        "effort": value.get("effort"),
+    }
+    if repo_meta is not None:
+        schedule_configurable["repo"] = repo_meta
     try:
         run = await dispatch_agent_run(
             thread_id,
             prompt,
             source="schedule",
-            configurable={
-                "source": "schedule",
-                "local_user": owner,
-                "model": value.get("model_id"),
-                "effort": value.get("effort"),
-            },
+            configurable=schedule_configurable,
             metadata={"kind": "schedule", "trigger": "cron"},
         )
     except Exception as exc:  # noqa: BLE001
@@ -134,7 +138,7 @@ async def reconcile_stale_runs() -> dict[str, Any]:
     dev server 重启后,run 会消失但线程仍标 busy;
     本任务把这类线程的展示态修正为 idle(不丢 checkpoint)。
     """
-    client = get_client()
+    client = langgraph_client()
     reconciled = 0
     try:
         # 只查 busy 线程(按 status 过滤;单用户本地,量小)
@@ -176,13 +180,14 @@ async def _launch(state: SchedulerState, config: RunnableConfig) -> dict[str, An
         if isinstance(prompt, str) and prompt.strip():
             local_user = state.get("local_user") or "local-user"
             try:
-                client = get_client()
+                client = langgraph_client()
                 thread = await client.threads.create(
                     metadata={
                         "kind": "agent",
                         "source": "schedule",
                         "local_user": local_user,
                         "trigger_kind": "schedule",
+                        "resolved": False,
                         "title": f"[定时] {state.get('name') or 'scheduled run'}",
                     }
                 )

@@ -62,6 +62,22 @@ def raw_httpx_headers(user: str | None = None) -> dict[str, str]:
     return _auth_headers(user)
 
 
+def search_items_list(result: Any) -> list[Any]:
+    """store ``search_items`` 结果 → items 列表(防 ``dict.items`` 方法误取)。
+
+    SDK 返回 ``SearchItemsResponse``(**dict**,形如 ``{"items": [...]}``);
+    对 dict 用 ``getattr(result, "items", ...)`` 会拿到内建 ``dict.items``
+    方法本身(iterable 判定即炸 TypeError)。统一走本函数。
+    """
+    if isinstance(result, dict):
+        items = result.get("items")
+        return items if isinstance(items, list) else []
+    if isinstance(result, list):
+        return result
+    items = getattr(result, "items", None)
+    return items if isinstance(items, list) else []
+
+
 def runtime_store_client(user: str | None = None) -> LangGraphClient:
     """store 访问客户端:统一经 HTTP 调运行时(bearer + 身份头)。
 

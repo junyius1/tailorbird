@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from .runtime_client import runtime_store_client as get_client
+from .runtime_client import search_items_list
 
 from .auth import require_admin, require_same_origin_for_mutations, require_session
 
@@ -81,7 +82,7 @@ async def list_skills(user: dict[str, Any] = Depends(require_session)) -> list[d
         result = await get_client().store.search_items(_user_ns(user["sub"]), limit=500)
     except Exception:  # noqa: BLE001
         return []
-    items = getattr(result, "items", result) if not isinstance(result, list) else result
+    items = search_items_list(result)
     out = []
     for item in items or []:
         name = getattr(item, "key", None) if not isinstance(item, dict) else item.get("key")
@@ -152,7 +153,7 @@ async def list_org_skills(user: dict[str, Any] = Depends(require_session)) -> li
         result = await get_client().store.search_items(_org_ns(), limit=500)
     except Exception:  # noqa: BLE001
         return []
-    items = getattr(result, "items", result) if not isinstance(result, list) else result
+    items = search_items_list(result)
     out = []
     for item in items or []:
         name = getattr(item, "key", None) if not isinstance(item, dict) else item.get("key")

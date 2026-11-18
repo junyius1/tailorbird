@@ -1,18 +1,33 @@
 """本地 Docker 沙箱 provider(设计书 §4.4 / 2024 设计书 §4.1.1)。
 
 替代全部 5 种云 provider(langsmith/daytona/modal/runloop/e2b),
-唯一 provider = ``docker``:每线程一个容器,跑在宿主 Docker daemon 上。
+唯一 provider = ``docker``(另一个 = ``local``;按线程/按 run 自由切换):
+每线程一个容器,跑在宿主 Docker daemon 上。
 
 要点:
 - 容器名 ``oswe-sbx-<thread_id 前 12 位>``;已存在且存活 → 复用;
   已删除 → ``SandboxGoneError``(调用方重建);不存在 → ``docker create``。
-- ``-v <宿主仓库绝对路径>:/workspace/<repo>``(bind mount,git 对象库共享宿主);
-  ``-v <线程 .gitconfig-sandbox>:/workspace/.gitconfig-sandbox:ro`` +
-  ``GIT_CONFIG_GLOBAL=/workspace/.gitconfig-sandbox`` → commit 作者 = 线程 owner 的 git 身份。
-- 命令执行 = ``docker exec -i -w /workspace/<repo> <容器> sh -lc <cmd>``;
+- 挂载清单来自 ``agent.sandbox_layout.resolve_thread_layout``(与 local
+  provider 共用同一份宿主目录,切换 provider 不丢状态):
+  - 路径仓库(``repo.local_path``)= **同路径挂载**——宿主路径在容器内挂到
+    **原路径**(如 ``/mnt/D/.../code_graphrag`` 挂到容器内原路径),用户消息里
+    的宿主路径在沙箱内直接可用;
+  - 普通仓库/无仓库 = ``<thread_root>:/workspace``(thread_root 每线程独占,
+    仓库在 ``<thread_root>/<name>``);
+  - ``DOCKER_SANDBOX_EXTRA_MOUNTS``(逗号分隔,可选)逐项追加
+    ``宿主路径:容器内路径[:ro]``(缺省只读,宿主路径支持 ``~``);
+    布局变更触发自动删容器重建;
+  - ``-v <线程 .gitconfig-sandbox>:/workspace/.gitconfig-sandbox:ro`` +
+    ``GIT_CONFIG_GLOBAL=/workspace/.gitconfig-sandbox`` → commit 作者 =
+    线程 owner 的 git 身份。
+- 命令执行 = ``docker exec -i -w <workdir> <容器> sh -lc <cmd>``;
+- 文件/搜索工具(继承自 ``BaseSandbox``)在**容器路径空间**工作,
+  ``upload_files``/``download_files`` 按挂载清单把容器路径映射到 bind mount
+  宿主路径落盘(零拷贝),命令仍走 docker exec。
   超时 = SIGTERM/SIGKILL 该 exec 进程(不杀容器)。
 - **不挂** Docker socket、**不注入**任何 API key / GitHub token。
-- run 结束**不销毁**(线程复用);删线程时 best-effort ``docker rm -f``。
+- run 结束**不销毁**(线程复用);切离 docker 时 best-effort ``docker stop``;
+  删线程时 best-effort ``docker rm -f``。
 """
 
 import asyncio
@@ -29,6 +44,9 @@ from deepagents.backends.protocol import (
     FileDownloadResponse,
     FileUploadResponse,
 )
+from deepagents.backends.sandbox import BaseSandbox
+
+from ..sandbox_layout import Mount, ThreadLayout, migrate_legacy_dirs, resolve_thread_layout
 
 logger = logging.getLogger(__name__)
 
@@ -174,39 +192,7 @@ def _read_host_git_identity() -> tuple[str | None, str | None]:
     return None, None
 
 
-def _repo_mount_point(repo: dict | None) -> tuple[str, str | None]:
-    """解析仓库 → (容器内挂载点, 宿主绝对路径)。
-
-    本变体仓库是**本地路径**概念:``repo = {"name": ..., "owner"?: ...}``。
-    宿主路径解析规则(与 utils/repo.py 的 resolve_local_repo 一致):
-    - REPO_LOCAL_PATHS 环境变量(owner/name 或 name → 宿主绝对路径)显式映射;
-    - 否则 ``/workspace/<repo>`` 下自动建目录(git init 由 agent 完成)。
-    无仓库时回退 ``/workspace``(宿主 ``LOCAL_SANDBOX_ROOT_DIR/workspace``)。
-    """
-    name = ""
-    if isinstance(repo, dict):
-        name = str(repo.get("name") or "").strip()
-    if not name:
-        root = Path(os.environ.get("LOCAL_SANDBOX_ROOT_DIR", "/tmp/tailorbird-sandboxes"))
-        host = root / "workspace"
-        return _WORKSPACE_ROOT, str(host)
-    # 显式映射表:owner/name 或 name → 宿主路径
-    mapping_raw = os.environ.get("REPO_LOCAL_PATHS", "")
-    owner = str((repo or {}).get("owner") or "").strip()
-    key = f"{owner}/{name}" if owner else name
-    for entry in mapping_raw.split(","):
-        if not entry.strip():
-            continue
-        map_key, sep, map_value = entry.partition(":")
-        if sep and map_key.strip() == key:
-            return f"{_WORKSPACE_ROOT}/{name}", map_value.strip()
-    # 默认:本地根目录下按仓库名建目录
-    root = Path(os.environ.get("LOCAL_SANDBOX_ROOT_DIR", "/tmp/tailorbird-sandboxes"))
-    host = root / "repos" / name
-    return f"{_WORKSPACE_ROOT}/{name}", str(host)
-
-
-class DockerSandbox:
+class DockerSandbox(BaseSandbox):
     """本地 Docker 容器沙箱后端(实现 SandboxBackendProtocol)。
 
     文件/搜索操作直接走 bind mount 的宿主路径(零拷贝、快),
@@ -215,6 +201,13 @@ class DockerSandbox:
 
     # execute 输出大时是否允许 capture-at-source offload(容器内 coreutils 齐全)
     enable_capture_offload: bool = False
+    # provider 标识(缓存/切换按此比较)
+    provider = "docker"
+
+    @property
+    def layout(self) -> ThreadLayout:
+        """统一布局(docker 挂载清单;与 local 共用宿主目录)。"""
+        return self._layout
 
     def __init__(
         self,
@@ -226,14 +219,17 @@ class DockerSandbox:
         self._sandbox_id: str = str(sandbox_id)
         # 容器名
         self._container: str = _container_name(self._sandbox_id)
-        # 仓库元信息(解析挂载点用)
+        # 仓库元信息(布局解析用)
         self._repo: dict | None = repo
         # 线程 owner(解析 git 身份用)
         self._owner_username: str | None = owner_username
-        # 容器内工作目录 / 宿主仓库路径(纯计算,无 I/O)
-        self._workdir, host_path = _repo_mount_point(repo)
-        # 宿主仓库目录(bind mount 源);实际 mkdir 在 _prepare_fs 里(线程池)
-        self._host_repo: str = host_path or ""
+        # 统一布局(与 local provider 共用同一份宿主目录;纯计算)。
+        # 路径仓库(local_path)= 同路径挂载:workdir 即宿主原路径,
+        # 用户消息里的宿主路径在沙箱内直接可用。
+        self._layout: ThreadLayout = resolve_thread_layout(self._sandbox_id, repo)
+        # 容器内工作目录 / 宿主仓库目录
+        self._workdir: str = self._layout.workdir
+        self._host_repo: str = self._layout.repo_host
         # 容器内 git 配置文件的宿主路径;实际写盘在 _prepare_fs 里(线程池)
         self._gitconfig_host: Path = _GITCONFIG_ROOT / f"{self._container}.gitconfig"
         # 命令默认超时
@@ -244,6 +240,7 @@ class DockerSandbox:
 
         身份由工厂在事件循环里解析好(注册表是 async store)后传入。
         """
+        Path(self._layout.thread_root).mkdir(parents=True, exist_ok=True)
         if self._host_repo:
             Path(self._host_repo).mkdir(parents=True, exist_ok=True)
         self._gitconfig_host = write_thread_gitconfig(
@@ -265,8 +262,16 @@ class DockerSandbox:
         """容器内工作目录(文件相对路径的根)。"""
         return self._workdir
 
+    def _desired_mounts(self) -> set[tuple[str, str]]:
+        """期望的 (Source, Destination) 挂载集合(布局变更检测用,与 ``_create_container`` 一致)。"""
+        return {(m.host, m.target) for m in self._layout.mounts}
+
     def _ensure_container(self) -> None:
-        """确保容器存在且运行;不存在则创建,死了则 start,删除则报错。"""
+        """确保容器存在且运行;不存在则创建,死了则 start,删除则报错。
+
+        挂载布局与期望不一致(如路径仓库的同路径挂载策略更新)→ 删除重建:
+        bind mount 在 ``docker create`` 时固定,无法热更新。
+        """
         try:
             state = _container_state(self._container)
         except DockerSandboxError as exc:
@@ -277,7 +282,32 @@ class DockerSandbox:
                 raise
         if state is None:
             self._create_container()
-        elif state == "exited" or state == "created":
+            return
+        # 挂载布局检测:期望集来自 layout.mounts;gitconfig 挂载是固定额外项,
+        # 排除后缺失/多余都触发重建(bind mount 在 docker create 时固定,无法热更新)
+        try:
+            out = _docker("inspect", "-f", "{{json .Mounts}}", self._container)
+            actual = {
+                (m.get("Source", ""), m.get("Destination", ""))
+                for m in json.loads(out or "[]")
+            }
+        except (DockerSandboxError, ValueError):
+            actual = set()
+        desired = self._desired_mounts()
+        gitconfig_src = str(self._gitconfig_host)
+        missing = desired - actual
+        stale = {p for p in actual if p not in desired and p[0] != gitconfig_src}
+        if actual and (missing or stale):
+            logger.info(
+                "沙箱 %s 挂载布局变更,重建容器: 缺 %s 旧 %s",
+                self._container,
+                sorted(missing),
+                sorted(stale),
+            )
+            _docker("rm", "-f", self._container, timeout=120)
+            self._create_container()
+            return
+        if state in ("exited", "created"):
             _docker("start", self._container)
         # running/created→started 后无需额外操作
 
@@ -303,12 +333,9 @@ class DockerSandbox:
             "-w",
             self._workdir,
         ]
-        # 仓库 bind mount(共享 git 对象库);宿主目录必须存在
-        if self._host_repo:
-            args += [
-                "-v",
-                f"{self._host_repo}:{self._workdir}",
-            ]
+        # 挂载清单(统一布局:thread_root→/workspace、路径仓库同路径、extras)
+        for m in self._layout.mounts:
+            args += ["-v", f"{m.host}:{m.target}" + (":ro" if m.read_only else "")]
         # 网络:bridge(默认)或 none(断网)
         if network == "none":
             args += ["--network", "none"]
@@ -405,11 +432,30 @@ class DockerSandbox:
     # ---- 文件操作(走 bind mount 的宿主路径直读,零拷贝)------------------
 
     def _host_path_for(self, path: str) -> Path:
-        """容器内相对/绝对路径 → 宿主路径(相对路径挂在仓库目录下)。"""
+        """容器路径 → 宿主路径(upload_files/download_files/delete 用)。
+
+        按 layout 挂载清单做**最长 target 前缀**映射:容器 ``<target>/...``
+        对应宿主 ``<host>/...``(路径仓库 target = 宿主原路径,映射恒等)。
+        挂载之外的容器路径(如 ``/tmp``)尽力挂到线程根下。
+        """
         cleaned = str(path).lstrip("/")
-        if not self._host_repo:
-            return Path(self._workdir) / cleaned
-        return Path(self._host_repo) / cleaned
+        if not cleaned:
+            return Path(self._layout.thread_root)
+        best: Mount | None = None
+        for m in self._layout.mounts:
+            t = m.target.lstrip("/")
+            if not t:
+                continue
+            if cleaned == t or cleaned.startswith(t + "/"):
+                if best is None or len(t) > len(best.target):
+                    best = m
+        if best is not None:
+            t = best.target.lstrip("/")
+            rest = "" if cleaned == t else cleaned[len(t) + 1 :]
+            base = Path(best.host)
+            return base if not rest else base / rest
+        # 挂载之外的容器路径(如 /tmp):挂到线程根下尽力映射
+        return Path(self._layout.thread_root) / cleaned
 
     def upload_files(
         self, files: list[tuple[str, bytes]]
@@ -477,6 +523,14 @@ class DockerSandbox:
 
     # ---- 生命周期 -------------------------------------------------------
 
+    def stop(self) -> None:
+        """best-effort 停止容器(切离 docker 时用;不删除,切回时复用)。"""
+        try:
+            _docker("stop", "-t", "10", self._container, timeout=30)
+            logger.info("已停止沙箱容器 %s", self._container)
+        except DockerSandboxError:
+            logger.debug("停止沙箱容器 %s 失败(可能不存在)", self._container, exc_info=True)
+
     def destroy(self) -> None:
         """best-effort 删除容器(删线程时调用;失败只告警不抛)。"""
         try:
@@ -496,11 +550,12 @@ def docker_daemon_available() -> bool:
 
 
 def validate_docker_startup_config() -> None:
-    """启动校验:daemon 可达 + 镜像名非空(失败拒启)。"""
+    """启动校验:daemon 不可达仅告警(线程/run 可改用 local);镜像名空拒启。"""
     if not docker_daemon_available():
-        raise RuntimeError(
+        logger.warning(
             "SANDBOX_TYPE=docker 但 Docker daemon 不可达(docker info 失败)。"
-            "请确认宿主 Docker 已启动,或改用 SANDBOX_TYPE=local 裸开发。"
+            "docker 沙箱将不可用(选 docker 的 run 在创建时失败);"
+            "可启动宿主 Docker,或在 run 级选择 local 裸开发。"
         )
     image = os.environ.get("DOCKER_SANDBOX_IMAGE", "python:3.12-slim")
     if not image:
@@ -530,6 +585,8 @@ async def create_docker_sandbox(
     git_name, git_email = await _resolve_git_identity(owner_username)
     backend = DockerSandbox(sandbox_id, repo=repo, owner_username=owner_username)
     try:
+        # 旧布局目录 best-effort 迁移(阻塞 I/O → 线程池)
+        await asyncio.to_thread(migrate_legacy_dirs, sandbox_id, repo)
         # 宿主侧前置(mkdir + gitconfig 写盘,阻塞 I/O → 线程池)
         await asyncio.to_thread(
             backend._prepare_fs, git_name, git_email

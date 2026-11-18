@@ -12,6 +12,7 @@ import uuid
 from typing import Any
 
 from .runtime_client import runtime_store_client as get_client
+from .runtime_client import search_items_list
 
 # store 命名空间:("plans", <thread_id>)
 _NAMESPACE = "plans"
@@ -108,7 +109,7 @@ async def list_plan_comments(thread_id: str) -> list[dict[str, Any]]:
         )
     except Exception:
         return []
-    items = getattr(result, "items", result) if not isinstance(result, list) else result
+    items = search_items_list(result)
     comments = [
         (getattr(i, "value", None) if not isinstance(i, dict) else i.get("value"))
         for i in items or []

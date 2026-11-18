@@ -22,9 +22,10 @@ import uuid
 from typing import Any
 from urllib.parse import urlparse
 
-from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.schema import Run
+
+from .dashboard.runtime_client import langgraph_client
 
 from .input_messages import (
     InputMessageContext,
@@ -110,11 +111,13 @@ def _dispatch_input(
     else:
         surface = "web"
     username = configurable.get("local_user") or "local-user"
+    entity_id = f"open-swe:{username}"
     context: InputMessageContext = {
-        "sender": username,
+        # _serialize_message 读 sender_id(信封 sender 属性);
+        # 实体 id 格式与 PersonIdentity.id 一致
+        "sender_id": entity_id,
         "surface": surface,
         "kind": "human",
-        "entity_id": f"open-swe:{username}",
     }
     # 本地用户身份(每次 run 都带,dynamic-context 去重由 dashboard 控制)
     person: PersonIdentity = {"id": f"open-swe:{username}", "platform": "open-swe"}
@@ -161,7 +164,7 @@ async def create_durable_run(
     after_seconds: float | None = None,
 ) -> Run:
     """创建带 Open SWE durable 默认值的 run。"""
-    client = client or get_client()
+    client = client or langgraph_client()
     run_config = prepare_run_config(config, metadata)
     # source 进 metadata(触发源)
     run_config["metadata"] = dict(run_config.get("metadata") or {})
@@ -213,14 +216,14 @@ async def dispatch_agent_run(
         configurable: 附加配置(local_user/repo/plan_mode/model 覆盖等)。
         metadata: 附加元数据。
         multitask_strategy: busy 语义(默认 interrupt)。
-        client: 运行时客户端(默认 get_client(),本进程内)。
+        client: 运行时客户端(默认 langgraph_client(),经 runtime_url 显式 HTTP)。
     """
     cfg = dict(configurable or {})
     # 触发源进 configurable(PrepareRun 中间件读 source 渲染提示)
     cfg.setdefault("source", source)
     # 已注入的 dynamic context hashes(从线程 metadata 读,避免重复注入身份)
     injected: set[str] = set()
-    client = client or get_client()
+    client = client or langgraph_client()
     if thread_id:
         try:
             thread = await client.threads.get(thread_id)

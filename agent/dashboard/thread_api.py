@@ -26,6 +26,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from ..utils.repo import normalize_repo_meta, repo_meta_to_full_name
 from ..utils.timing import server_timing_header
 from .auth import require_session, require_same_origin_for_mutations
 from .runtime_client import langgraph_client, raw_httpx_headers, runtime_url
@@ -115,11 +116,15 @@ async def _get_thread_or_404(
 def _thread_summary(thread: dict[str, Any], user: dict[str, Any] | None = None) -> dict[str, Any]:
     """Thread 对象 → ThreadListItem(列表/详情元素结构)。
 
-    字段:``id, title, repo, branch, model, effort, planMode, planStatus,
-    source, threadCategory, triggerKind, status, viewed, viewedAt,
-    createdAt, updatedAt, lastUserMessage?``。
+    字段:``id, title, repo, repoFullName, branch, model, effort, planMode,
+    planStatus, source, threadCategory, triggerKind, status, viewed,
+    viewedAt, createdAt, updatedAt, lastUserMessage?``。
     """
     metadata = thread.get("metadata") or {}
+    # repo 展示:name = 末段(路径仓库 = 目录名);full_name = owner/name 或路径
+    repo_meta = metadata.get("repo")
+    repo_full = repo_meta_to_full_name(repo_meta)
+    repo_name = repo_full.rsplit("/", 1)[-1] if repo_full else ""
     # 展示态:由 latest_run_status 推导
     latest = metadata.get("latest_run_status")
     if latest in ("pending", "running"):
@@ -133,12 +138,14 @@ def _thread_summary(thread: dict[str, Any], user: dict[str, Any] | None = None) 
     return {
         "id": thread.get("thread_id"),
         "title": metadata.get("title") or "(未命名)",
-        "repo": metadata.get("repo"),
+        "repo": repo_name,
+        "repoFullName": repo_full,
         "branch": metadata.get("branch"),
         "model": metadata.get("model"),
         "effort": metadata.get("effort"),
         "planMode": bool(metadata.get("plan_mode")),
         "planStatus": metadata.get("plan_status"),
+        "sandboxType": metadata.get("sandbox_type"),
         "source": metadata.get("source") or "web",
         "threadCategory": metadata.get("thread_category") or "interactive",
         "triggerKind": metadata.get("trigger_kind") or "user",
@@ -150,6 +157,9 @@ def _thread_summary(thread: dict[str, Any], user: dict[str, Any] | None = None) 
         "createdAt": thread.get("created_at"),
         "updatedAt": thread.get("updated_at"),
         "lastUserMessage": metadata.get("last_user_message"),
+        # transcript 由客户端从 SDK 水合(GET …/state → stream.messages);
+        # summary 只带元数据,但前端 AgentThread 类型要求 messages 存在(上游同此)。
+        "messages": [],
         "isOwner": bool(user and (metadata.get("local_user") in (None, user["sub"]) or _is_admin(user))),
     }
 
@@ -302,20 +312,74 @@ async def get_thread(
     return summary
 
 
+class SandboxSwitchBody(BaseModel):
+    """沙箱类型切换请求体(线程级默认)。"""
+
+    # docker 或 local
+    type: str
+
+
+@router.post("/threads/{thread_id}/sandbox")
+async def switch_thread_sandbox(
+    thread_id: str, body: SandboxSwitchBody, user: dict[str, Any] = Depends(require_session)
+) -> dict[str, Any]:
+    """设置线程的沙箱 provider 默认并立即停掉当前容器(切换不丢状态)。
+
+    - 线程存在且归属校验(与现有一致,非本人 404);
+    - type 只认 docker/local,否则 422;
+    - 线程有活动 run → 409(运行中不切,下一个 run 生效);
+    - type=docker 且 daemon 不可达 → 503(启动 Docker 或改用 local);
+    - 更新 ``metadata.sandbox_type``(线程默认;run 级 configurable 仍可覆盖);
+    - best-effort ``docker stop`` 该线程容器(容器名按 thread_id 纯计算;
+      下次 run 的 ensure 逻辑见类型不一致 → 停旧 + 按新类型重建,统一布局
+      共用宿主目录,来回切换文件/git 无损)。
+    """
+    from ..utils.sandbox import validate_sandbox_type
+
+    try:
+        sandbox_type = validate_sandbox_type(body.type)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    thread = await _get_thread_or_404(thread_id, user)
+    metadata = thread.get("metadata") or {}
+    if _run_in_flight(thread, metadata):
+        raise HTTPException(status_code=409, detail="thread is running; wait for it to finish")
+    if sandbox_type == "docker":
+        from ..integrations.docker import docker_daemon_available
+
+        if not docker_daemon_available():
+            raise HTTPException(
+                status_code=503,
+                detail="Docker daemon unreachable; start Docker or switch to local",
+            )
+    client = _client_for(user)
+    try:
+        await client.threads.update(thread_id, metadata={"sandbox_type": sandbox_type})
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail="runtime unreachable")
+    # best-effort 停容器(docker 侧省内存;切回时容器还在则复用/重建)
+    from ..integrations.docker import _container_name, _docker
+
+    try:
+        _docker("stop", "-t", "10", _container_name(thread_id), timeout=30)
+    except Exception:  # noqa: BLE001
+        logger.debug("切换沙箱时停止容器失败(best-effort) thread=%s", thread_id, exc_info=True)
+    return {"thread_id": thread_id, "sandbox_type": sandbox_type, "effective": True}
+
+
 @router.delete("/threads/{thread_id}", status_code=204)
 async def delete_thread(
     thread_id: str, user: dict[str, Any] = Depends(require_session)
 ) -> Response:
     """删线程 + 其 checkpoint/流 + llm_reasoning 该线程全部行(不可恢复)。"""
     thread = await _get_thread_or_404(thread_id, user)
-    # best-effort 清理沙箱容器(删线程时)
-    from ..integrations.docker import DockerSandbox, _container_name
+    # best-effort 清理沙箱容器(删线程时;容器名可按 thread_id 纯计算)
+    from ..integrations.docker import _container_name, _docker
 
-    if (os.environ.get("SANDBOX_TYPE", "docker") == "docker"):
-        try:
-            DockerSandbox(thread_id).destroy()
-        except Exception:  # noqa: BLE001
-            logger.debug("删线程时清理沙箱失败(best-effort)", exc_info=True)
+    try:
+        _docker("rm", "-f", _container_name(thread_id), timeout=30)
+    except Exception:  # noqa: BLE001
+        logger.debug("删线程时清理沙箱失败(best-effort)", exc_info=True)
     # 级联删推理行(设计书 §5.2.1)
     from ..reasoning_store import delete_thread as delete_reasoning
 
@@ -332,7 +396,6 @@ async def delete_thread(
         raise HTTPException(status_code=502, detail="runtime unreachable")
     # 失效 state 缓存
     state_cache().invalidate(thread_id)
-    _ = _container_name
     return Response(status_code=204)
 
 
@@ -530,10 +593,20 @@ _EVENT_STREAMING_V2_KEY = "__event_streaming_v2"
 
 
 def _enrich_run_start(
-    params: dict[str, Any], user: dict[str, Any], thread_id: str, creating: bool
+    params: dict[str, Any],
+    user: dict[str, Any],
+    thread_id: str,
+    creating: bool,
+    existing_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """富化 run.start:注入 configurable + metadata(source=dashboard)。"""
+    """富化 run.start:注入 configurable + metadata(source=dashboard)。
+
+    已有线程且本次未带 repo 时,回退线程创建时的 ``metadata.repo``
+    (沙箱缓存丢失重建时仍能挂回同一仓库)。
+    """
     import uuid as _uuid
+
+    from ..utils.sandbox import validate_sandbox_type
 
     params = dict(params)
     config = dict(params.get("config") or {})
@@ -541,6 +614,27 @@ def _enrich_run_start(
     # 触发源 = dashboard(§15.4.3)
     configurable["source"] = "dashboard"
     configurable["local_user"] = user["sub"]
+    # run 级沙箱选择(UI composer;非法值丢弃,由服务端默认兜底)
+    raw_sbx = configurable.get("sandbox_type")
+    if isinstance(raw_sbx, str) and raw_sbx.strip():
+        try:
+            configurable["sandbox_type"] = validate_sandbox_type(raw_sbx)
+        except ValueError:
+            configurable.pop("sandbox_type", None)
+    else:
+        configurable.pop("sandbox_type", None)
+    # 线程级沙箱默认(run 级未设时注入;metadata.sandbox_type 由切换 API 维护)
+    meta_sbx = (existing_metadata or {}).get("sandbox_type")
+    if "sandbox_type" not in configurable and isinstance(meta_sbx, str) and meta_sbx.strip():
+        configurable["sandbox_type"] = meta_sbx.strip()
+    # repo 归一化:UI 传 full_name/本地路径字符串 → dict 元信息
+    # (路径仓库带 local_path,沙箱挂载直达该目录;§11)
+    repo_meta = normalize_repo_meta(configurable.get("repo"))
+    if repo_meta is None and not creating:
+        stored = (existing_metadata or {}).get("repo")
+        repo_meta = normalize_repo_meta(stored if isinstance(stored, dict) else None)
+    if repo_meta is not None:
+        configurable["repo"] = repo_meta
     # prepare_run_id:关联 PrepareRun 中间件(每次 run 新 uuid)
     configurable.setdefault("prepare_run_id", _uuid.uuid4().hex)
     # 必须置位:v3 流协议标记
@@ -561,6 +655,8 @@ def _enrich_run_start(
         metadata.setdefault("local_user", user["sub"])
         metadata.setdefault("thread_category", "interactive")
         metadata.setdefault("trigger_kind", "user")
+        # 缺省未解决:侧栏/列表按 resolved 分组,缺 key 的线程两边都查不到
+        metadata.setdefault("resolved", False)
         # 标题:首条消息前 80 字符
         title = ""
         input_messages = (params.get("input") or {}).get("messages") or []
@@ -579,7 +675,14 @@ def _enrich_run_start(
         slug = re.sub(r"[^a-z0-9]+", "-", (title or "thread").lower()).strip("-")[:40] or "thread"
         metadata.setdefault("branch", f"local/{slug}")
         metadata.setdefault("base_branch", "main")
+        # 本次显式选择了仓库(含"添加路径")→ 覆盖默认
+        if repo_meta is not None:
+            metadata["repo"] = repo_meta
+        # run 级显式选择沙箱 → 同时落为线程默认
+        if configurable.get("sandbox_type"):
+            metadata["sandbox_type"] = configurable["sandbox_type"]
         params["metadata"] = metadata
+    # 已有线程:configurable 已归一化(或回退 metadata.repo),metadata 保持创建时形态
     return params
 
 
@@ -617,6 +720,7 @@ async def proxy_commands(
     client = _client_for(user)
     # 线程是否存在(run.start 可 lazy 建)
     creating = False
+    existing_metadata: dict[str, Any] = {}
     try:
         existing = await client.threads.get(thread_id)
         if existing is None:
@@ -626,6 +730,7 @@ async def proxy_commands(
         else:
             # 归属判断(非 run.start 必须已存在且可访问)
             metadata = existing.get("metadata") or {}
+            existing_metadata = dict(metadata)
             owner = metadata.get("local_user")
             if owner and not _is_admin(user) and owner != user["sub"]:
                 raise HTTPException(status_code=404, detail="not found")
@@ -639,7 +744,26 @@ async def proxy_commands(
         else:
             raise HTTPException(status_code=502, detail="runtime unreachable")
     if method == "run.start":
-        params = _enrich_run_start(params, user, thread_id, creating)
+        params = _enrich_run_start(
+            params, user, thread_id, creating, existing_metadata
+        )
+        if creating:
+            # 真正 lazy 建线程:运行时 commands 端点要求线程已存在,不在这里建
+            # → run.start 报 thread not found → 前端死循环轮询 404。
+            # 建线程时把 _enrich_run_start 已组好的全量 metadata(owner/title/
+            # repo/resolved)一并打进去,否则记录缺 local_user → 归属过滤与
+            # 列表都查不到。if_exists=do_nothing 规避 get/create 之间被并发建
+            # 的 409(与上游 open-swe 首 run.start 建线程记录同形)。
+            try:
+                await client.threads.create(
+                    thread_id=thread_id,
+                    metadata=params.get("metadata"),
+                    if_exists="do_nothing",
+                )
+            except Exception:  # noqa: BLE001
+                raise HTTPException(
+                    status_code=502, detail="runtime unreachable"
+                )
     # 透传到运行时同名端点(SDK 无 commands 命名空间,走 raw httpx + 身份头)
     import httpx
 
@@ -973,33 +1097,39 @@ async def _sse_upstream(
                     return
 
             disconnect_task = asyncio.ensure_future(_watch_disconnect())
-            # 逐 chunk 读,受空闲/存活上限约束
-            idle_deadline = asyncio.get_event_loop().time() + _STREAM_IDLE_TIMEOUT
+            # 逐 chunk 读,受空闲/存活上限约束。
+            # 注意:aiter_bytes() 只能调用一次(httpx 流式响应一次性消费,
+            # 二次调用抛 StreamConsumed),必须在循环外创建迭代器;超时/断连
+            # 通过取消 read_task 实现,而不是丢弃半消费的迭代器。
+            chunks = response.aiter_bytes()
             while True:
                 remaining_lifetime = (
                     deadline_start + _STREAM_MAX_LIFETIME - asyncio.get_event_loop().time()
                 )
                 budget = max(0.1, min(_STREAM_IDLE_TIMEOUT, remaining_lifetime))
+                read_task = asyncio.ensure_future(anext(chunks))
                 try:
-                    chunk = await asyncio.wait_for(
-                        anext(response.aiter_bytes()), timeout=budget
-                    )
-                except (StopAsyncIteration,):
+                    chunk = await asyncio.wait_for(read_task, timeout=budget)
+                except StopAsyncIteration:
                     break  # 上游正常结束(run 终止帧后关流)
                 except (TimeoutError, asyncio.TimeoutError):
                     break  # 空闲/存活超时
+                except httpx.HTTPError as exc:
+                    read_task.cancel()
+                    yield f"event: error\ndata: {json.dumps({'detail': str(exc)[:300]})}\n\n"
+                    break
                 if not chunk:
                     break
-                idle_deadline = asyncio.get_event_loop().time() + _STREAM_IDLE_TIMEOUT
                 yield chunk
                 # 客户端断开检查
                 if disconnect_task.done():
+                    read_task.cancel()
                     break
         except httpx.HTTPError as exc:
             yield f"event: error\ndata: {json.dumps({'detail': str(exc)[:300]})}\n\n"
         finally:
             # 客户端断开/超时/结束:必须取消并释放上游订阅(否则泄漏事件循环)
-            for task in (disconnect_task,):
+            for task in (read_task, disconnect_task):
                 if task is not None and not task.done():
                     task.cancel()
                     try:
@@ -1099,19 +1229,16 @@ async def get_reasoning_one(
 
 
 def _sandbox_host_repo(thread_id: str, repo: dict | None = None) -> str | None:
-    """线程 → 宿主仓库路径(docker provider 的 bind mount 源)。"""
-    from ..utils.sandbox import sandbox_type
+    """线程 → 宿主仓库路径(统一布局;differ/diff 端点不再关心 provider)。"""
+    from ..sandbox_layout import resolve_thread_layout
 
-    if sandbox_type() == "docker":
-        from ..integrations.docker import _repo_mount_point
-
-        _workdir, host = _repo_mount_point(repo)
-        return host
-    if sandbox_type() == "local":
-        from ..integrations.local import _thread_root
-
-        return _thread_root(thread_id)
-    return None
+    if repo is not None and not isinstance(repo, dict):
+        repo = normalize_repo_meta(repo, create=False)
+    try:
+        return resolve_thread_layout(thread_id, repo).repo_host
+    except Exception:  # noqa: BLE001
+        logger.debug("线程布局解析失败 thread=%s", thread_id, exc_info=True)
+        return None
 
 
 def _run_git(repo_dir: str, *args: str) -> str:

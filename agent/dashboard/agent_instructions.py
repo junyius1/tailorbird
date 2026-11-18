@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from .runtime_client import runtime_store_client as get_client
+from .runtime_client import search_items_list
 
 from .auth import require_same_origin_for_mutations, require_session
 
@@ -58,7 +59,7 @@ async def list_agent_instructions(user: dict[str, Any] = Depends(require_session
         result = await get_client().store.search_items([_NAMESPACE], limit=500)
     except Exception:  # noqa: BLE001
         return []
-    items = getattr(result, "items", result) if not isinstance(result, list) else result
+    items = search_items_list(result)
     out = []
     for item in items or []:
         key = getattr(item, "key", None) if not isinstance(item, dict) else item.get("key")

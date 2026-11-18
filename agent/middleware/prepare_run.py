@@ -61,6 +61,9 @@ class PrepareRunMiddleware(AgentMiddleware):
         plan_mode: bool = False,
         plan_url: str = "",
         profile_reasoning_stream: bool | None = None,
+        working_dir: str | None = None,
+        provider: str | None = None,
+        same_path_mount: bool = False,
     ) -> None:
         super().__init__()
         # 线程 id
@@ -77,16 +80,31 @@ class PrepareRunMiddleware(AgentMiddleware):
         self._plan_url: str = plan_url
         # 属主 profile 的推理流开关(§10.6 单一事实源)
         self._profile_reasoning_stream: bool | None = profile_reasoning_stream
+        # 沙箱工作目录(图工厂从 backend.workdir 传入;路径仓库时即宿主原路径)
+        self._working_dir: str | None = working_dir
+        # 沙箱 provider(docker/local;"同路径挂载"说明仅 docker 适用)
+        self._provider: str | None = provider
+        # 路径仓库(local_path)同路径挂载标记:仅此时宿主路径说明才成立
+        self._same_path_mount: bool = same_path_mount
 
     async def abefore_agent(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:
         """run 开始前:渲染系统提示写进 state(工作目录缺省 /workspace)。"""
-        # 工作目录:由沙箱 backend 的 root 决定;缺省 /workspace
-        work_dir = state.get("work_dir") or "/workspace"
+        # 工作目录:沙箱 backend.workdir(图工厂传入)优先;路径仓库时 = 宿主原路径
+        work_dir = self._working_dir or state.get("work_dir") or "/workspace"
+        # 同路径挂载说明(仅 docker + 路径仓库):宿主路径在容器内原样可用,
+        # 避免模型把路径改写或误判未挂载;local 无容器、普通仓库 workdir 是
+        # 容器内路径,均无需说明
+        mount_note = ""
+        if self._same_path_mount and self._provider == "docker" and self._working_dir:
+            from ..prompt import IDENTITY_MOUNT_NOTE
+
+            mount_note = IDENTITY_MOUNT_NOTE.format(host_path=self._working_dir)
         rendered = construct_system_prompt(
             working_dir=work_dir,
             source=self._source,
             plan_mode=self._plan_mode,
             plan_url=self._plan_url,
+            mount_note=mount_note,
         )
         # 发送者上下文:作为 user 消息注入(与参考实现一致)。
         # 不能用 SystemMessage:本地 vLLM/Qwen 要求 system 消息必须在最前,

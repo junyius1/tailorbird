@@ -145,6 +145,23 @@ class _StaticPromptMiddleware(AgentMiddleware):
         return await handler(request)
 
 
+def _is_same_path_mount(repo: object) -> bool:
+    """repo 是否为路径仓库(local_path;宿主原路径同路径挂载)。
+
+    接受 dict(dashboard/scheduler 已归一化)或 str(本地绝对路径,如
+    ``run.start`` 未经富化),归一化后判断。
+    """
+    if not repo:
+        return False
+    if isinstance(repo, str):
+        from ..utils.repo import normalize_repo_meta
+
+        repo = normalize_repo_meta(repo, create=False)
+    if isinstance(repo, dict):
+        return bool(str(repo.get("local_path") or "").strip())
+    return False
+
+
 async def _build_threaded_agent(config: RunnableConfig, sandbox: SandboxBackendProtocol) -> CompiledStateGraph:
     """构造带沙箱的完整 agent(中间件链 + 本地模型 + 工具)。"""
     configurable = _configurable_of(config)
@@ -182,6 +199,12 @@ async def _build_threaded_agent(config: RunnableConfig, sandbox: SandboxBackendP
             model_id=model_id,
             effort=effort,
             plan_mode=plan_mode,
+            # 沙箱真实工作目录:路径仓库时 = 宿主原路径(同路径挂载),
+            # 进系统提示让模型直接用用户消息里的路径
+            working_dir=getattr(sandbox, "workdir", None),
+            provider=getattr(sandbox, "provider", None),
+            # 路径仓库(local_path)= 宿主原路径同路径挂载,提示词需带说明
+            same_path_mount=_is_same_path_mount(configurable.get("repo")),
         ),
     ]
 
@@ -235,8 +258,12 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     if thread_id is None or not _is_for_execution(config):
         logger.debug("无 thread_id 或非执行态,构造无沙箱兜底 agent")
         return (await _build_stub_agent(config)).with_config(config)
-    # 确保线程沙箱(缓存命中直接复用;丢失则重建)
-    sandbox = await ensure_sandbox_for_thread(thread_id, config)
+    # 确保线程沙箱(缓存命中直接复用;类型变更/丢失则重建)
+    sandbox = await ensure_sandbox_for_thread(
+        thread_id,
+        config,
+        metadata=config.get("metadata"),
+    )
     agent = await _build_threaded_agent(config, sandbox)
     return agent.with_config(config)
 

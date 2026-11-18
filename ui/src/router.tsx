@@ -1,5 +1,6 @@
 // 路由器工厂:TanStack Start 约定(服务端/客户端各调一次)。
 import { createRouter as createTanStackRouter } from "@tanstack/react-router"
+import { setupRouterSsrQueryIntegration } from "@tanstack/react-router-ssr-query"
 
 import { makeQueryClient } from "./lib/query"
 import { routeTree } from "./routeTree.gen"
@@ -17,6 +18,10 @@ export function getRouter() {
     // 悬停即预载路由(体验优化)
     defaultPreload: "intent",
   })
+  // SSR 解析的 query 状态(会话等)脱水到客户端,否则水合首帧 queryClient
+  // 为空 → useSession().isLoading 渲染 loading 骨架,与 SSR 完整布局不一致
+  // → 水合失败 → 客户端整树重渲。上游 open-swe 同此接线(依赖已在 devDeps)。
+  setupRouterSsrQueryIntegration({ router, queryClient })
   return router
 }
 

@@ -5,6 +5,7 @@ description = "自托管编程 agent 服务器(2024 运行时 + dashboard),本�
 requires-python = ">=3.11"
 license = { text = "MIT" }
 # 依赖:langchain / langgraph / deepagents 使用 3partylibs 下的源码(editable)
+# 运行时:agent.runtime(自研 FastAPI),已移除 langgraph-cli / langgraph_api / inmem
 dependencies = [
     "fastapi>=0.141.1",
     "uvicorn[standard]>=0.52.0",
@@ -19,7 +20,7 @@ dependencies = [
     "markdownify>=1.2.3",
     "langchain-anthropic>=1.5.4",
     "langchain-openai>=1.4.1,<2.0.0",
-    "langgraph-cli[inmem]>=0.4.31",
+    "croniter>=6.2.4,<7.0",
     "psycopg[binary]>=3.3",
     "psycopg-pool>=3.3",
     "python-dotenv>=1.0",

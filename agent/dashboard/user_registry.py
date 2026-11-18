@@ -12,6 +12,7 @@ import os
 from typing import Any
 
 from .runtime_client import runtime_store_client as get_client
+from .runtime_client import search_items_list
 
 # store 命名空间:("local_users", <username>)
 _NAMESPACE = "local_users"
@@ -52,7 +53,7 @@ async def list_user_records() -> list[dict[str, Any]]:
     """列全部用户(admin 页用)。"""
     client = get_client()
     result = await client.store.search_items([_NAMESPACE], limit=500)
-    items = getattr(result, "items", result) if not isinstance(result, list) else result
+    items = search_items_list(result)
     records: list[dict[str, Any]] = []
     for item in items or []:
         value = getattr(item, "value", None) if not isinstance(item, dict) else item
