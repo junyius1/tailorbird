@@ -318,6 +318,7 @@ export function AgentsHome() {
       repo_explicitly_none: repoOverride === null,
       model_id: activeSelection?.modelId ?? null,
       effort: activeSelection?.effort ?? null,
+      sandbox_type: sandboxType === "default" ? null : sandboxType,
     }
     setSubmitting(true)
 

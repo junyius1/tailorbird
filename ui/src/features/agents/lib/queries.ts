@@ -672,6 +672,7 @@ export interface CreateAgentThreadVariables {
   repo_explicitly_none?: boolean
   model_id?: string | null
   effort?: string | null
+  sandbox_type?: "docker" | "local" | null
 }
 
 /**
@@ -718,6 +719,7 @@ export function optimisticThread(
     updatedAt: now,
     traceUrl: null,
     sandboxId: null,
+    sandboxType: vars.sandbox_type ?? null,
     messages: message.chunks.length > 0 ? [message] : [],
   }
 }

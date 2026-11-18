@@ -102,6 +102,12 @@ export function AgentThreadView({
       ? thread.sandboxType
       : "default"
   )
+  // 乐观种子 / refetch 让 thread.sandboxType 晚于 mount 到达时,同步下拉框
+  useEffect(() => {
+    if (thread.sandboxType === "docker" || thread.sandboxType === "local") {
+      setSandboxType(thread.sandboxType)
+    }
+  }, [thread.sandboxType])
   const activeModel = models.find(
     (model) => model.id === activeSelection?.modelId
   )
