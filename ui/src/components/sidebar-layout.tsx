@@ -28,7 +28,7 @@ function readStoredWidth(): number {
 function readStoredCollapsed(): boolean {
   if (typeof window === "undefined") return false
   // On mobile the sidebar is a full-screen overlay, so start collapsed to keep
-  // the chat visible regardless of the stored desktop preference.
+  // the chat visible regardless of the stored preference.
   if (window.matchMedia("(max-width: 767px)").matches) return true
   return window.localStorage.getItem(STORAGE_COLLAPSED) === "1"
 }
@@ -60,7 +60,7 @@ export function useSidebarLayout() {
 
   const closeOnMobile = useCallback(() => {
     if (typeof window === "undefined") return
-    // State-only: don't persist, so the desktop collapsed preference is preserved.
+    // State-only: don't persist, so the user's stored preference is preserved.
     if (window.matchMedia("(max-width: 767px)").matches) setCollapsedState(true)
   }, [])
 
@@ -114,9 +114,6 @@ export function SidebarFrame({
   className,
   children,
 }: SidebarFrameProps) {
-  const isDesktop =
-    typeof window !== "undefined" && Boolean(window.openSweDesktop)
-
   if (collapsed) {
     return (
       <button
@@ -124,10 +121,7 @@ export function SidebarFrame({
         aria-label="Expand sidebar"
         data-sidebar-expand=""
         onClick={toggle}
-        className={cn(
-          "fixed top-3 left-3 z-30 flex size-7 cursor-pointer items-center justify-center rounded-md border border-border bg-background text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground",
-          isDesktop && "top-2 left-[90px] border-0 bg-transparent shadow-none"
-        )}
+        className="fixed top-3 left-3 z-30 flex size-7 cursor-pointer items-center justify-center rounded-md border border-border bg-background text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
       >
         <SidebarSimpleIcon className="size-4" />
       </button>
@@ -220,9 +214,6 @@ export function SidebarCollapseButton({
   onToggle,
   className,
 }: SidebarCollapseButtonProps) {
-  const isDesktop =
-    typeof window !== "undefined" && Boolean(window.openSweDesktop)
-
   return (
     <button
       type="button"
@@ -231,7 +222,6 @@ export function SidebarCollapseButton({
       onClick={onToggle}
       className={cn(
         "flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground",
-        isDesktop && "fixed top-2 left-[90px] z-30 size-7",
         className
       )}
     >

@@ -59,20 +59,13 @@ const LINK_CLASS =
 
 export function AppSidebar({ user }: { user: SessionUser }) {
   const layout = useSidebarLayout()
-  const isDesktop =
-    typeof window !== "undefined" && Boolean(window.openSweDesktop)
 
   return (
     <SidebarFrame
       {...layout}
       className="border-r border-border bg-sidebar text-sidebar-foreground"
     >
-      <div
-        className={cn(
-          "flex items-center justify-between px-4 pb-4",
-          isDesktop ? "pt-13" : "pt-5"
-        )}
-      >
+      <div className="flex items-center justify-between px-4 pb-4 pt-5">
         <Link
           to="/agents"
           className={cn(LINK_CLASS, "-mx-2.5 font-medium")}

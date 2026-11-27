@@ -65,8 +65,6 @@ export function AgentThreadView({
   const sendMessage = useSubmitAgentMessage(thread.id)
   const stream = useAgentThreadStream()
   const isMobile = useIsMobile()
-  const isDesktop =
-    typeof window !== "undefined" && Boolean(window.openSweDesktop)
   const sidebarCollapsed = useSidebarCollapsed()
   const skills = useAgentSkills()
   const session = useSession()
@@ -242,7 +240,7 @@ export function AgentThreadView({
           <div
             className={cn(
               "flex h-full w-full items-center gap-3 px-4",
-              sidebarCollapsed && (isDesktop ? "pl-32" : "pl-14"),
+              sidebarCollapsed && "pl-14",
               panelCollapsed && "pr-14"
             )}
           >

@@ -8,7 +8,6 @@ import {
   useState,
 } from "react"
 import { useNavigate } from "@tanstack/react-router"
-import type { DesktopCommandId } from "@/desktop"
 
 import { AppCommandPalette } from "@/components/AppCommandPalette"
 import { AppShortcutReference } from "@/components/AppShortcutReference"
@@ -24,8 +23,6 @@ export interface AppCommand {
   run?: () => void | Promise<void>
   available?: boolean
   showInPalette?: boolean
-  desktopId?: DesktopCommandId
-  desktopShortcuts?: ReadonlyArray<string>
 }
 
 export function createNewThreadCommand(run: () => void): AppCommand {
@@ -36,7 +33,6 @@ export function createNewThreadCommand(run: () => void): AppCommand {
     shortcuts: ["c"],
     group: "General",
     run,
-    desktopId: "new-thread",
   }
 }
 
@@ -98,8 +94,6 @@ export function AppCommandProvider({
         group: "General",
         run: openPalette,
         showInPalette: false,
-        desktopId: "show-command-palette",
-        desktopShortcuts: ["mod+k"],
       },
       createNewThreadCommand(() => void navigate({ to: "/agents" })),
       {
@@ -109,8 +103,6 @@ export function AppCommandProvider({
         shortcuts: ["mod+,"],
         group: "Navigation",
         run: () => void navigate({ to: "/my-settings" }),
-        desktopId: "open-settings",
-        desktopShortcuts: ["mod+,"],
       },
       {
         id: "show-keyboard-shortcuts",
@@ -119,8 +111,6 @@ export function AppCommandProvider({
         shortcuts: ["mod+/", "?"],
         group: "General",
         run: openShortcutReference,
-        desktopId: "show-keyboard-shortcuts",
-        desktopShortcuts: ["mod+/"],
       },
     ],
     [navigate, openPalette, openShortcutReference]
@@ -151,14 +141,11 @@ export function AppCommandProvider({
     if (!enabled || paletteOpen || shortcutReferenceOpen) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (shouldIgnoreHotkey(event)) return
-      const desktop = Boolean(window.openSweDesktop)
       const command = commandsRef.current.find(
         (candidate) =>
           candidate.run &&
-          candidate.shortcuts?.some(
-            (shortcut) =>
-              !(desktop && candidate.desktopShortcuts?.includes(shortcut)) &&
-              eventMatchesShortcut(event, shortcut)
+          candidate.shortcuts?.some((shortcut) =>
+            eventMatchesShortcut(event, shortcut)
           )
       )
       if (!command?.run) return
@@ -168,19 +155,6 @@ export function AppCommandProvider({
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [enabled, paletteOpen, shortcutReferenceOpen])
-
-  useEffect(() => {
-    const desktop = window.openSweDesktop
-    if (!desktop) return
-    return desktop.onCommand((commandId) => {
-      if (!enabledRef.current) return
-      const command = commandsRef.current.find(
-        (candidate) =>
-          candidate.desktopId === commandId && candidate.run !== undefined
-      )
-      if (command?.run) void command.run()
-    })
-  }, [])
 
   const context = useMemo<AppCommandsContextValue>(
     () => ({ commands, openPalette, openShortcutReference, register }),
