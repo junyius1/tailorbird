@@ -56,12 +56,7 @@ function AgentsLayout() {
   if (!session.data) return <RequireLogin />
 
   return (
-    <AgentsShell
-      user={session.data}
-      localOnly={false}
-      activeThreadId={activeThreadId}
-      activeLocalSessionId={undefined}
-    >
+    <AgentsShell user={session.data} activeThreadId={activeThreadId}>
       <AgentThreadStreamProvider threadId={activeThreadId ?? null}>
         <Outlet />
       </AgentThreadStreamProvider>

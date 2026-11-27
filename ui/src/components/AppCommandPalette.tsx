@@ -2,7 +2,6 @@ import { Dialog } from "@base-ui/react/dialog"
 import { useNavigate } from "@tanstack/react-router"
 import {
   Command as CommandIcon,
-  Laptop,
   LoaderCircle,
   MessageSquare,
   Search,
@@ -11,10 +10,8 @@ import { useEffect, useMemo, useState } from "react"
 
 import type { AppCommand } from "@/lib/appCommands"
 import type { AgentThread } from "@/features/agents/lib/types"
-import type { DesktopLocalThreadSummary } from "@/desktop"
 import { Kbd } from "@/components/ui/kbd"
 import { useInfiniteThreadsPages } from "@/features/agents/lib/queries"
-import { useDesktopLocalThreads } from "@/features/agents/lib/desktopLocal"
 import { useShortcutLabel } from "@/lib/hotkeys"
 import { cn } from "@/lib/utils"
 
@@ -32,14 +29,7 @@ interface CloudThreadResult {
   thread: AgentThread
 }
 
-interface LocalThreadResult {
-  id: string
-  kind: "local-thread"
-  label: string
-  thread: DesktopLocalThreadSummary
-}
-
-type PaletteResult = CommandResult | CloudThreadResult | LocalThreadResult
+type PaletteResult = CommandResult | CloudThreadResult
 
 function ShortcutHint({ shortcut }: { shortcut: string }) {
   const label = useShortcutLabel(shortcut)
@@ -56,7 +46,6 @@ function commandMatches(command: AppCommand, query: string): boolean {
 export function buildPaletteResults(
   commands: ReadonlyArray<AppCommand>,
   cloudThreads: ReadonlyArray<AgentThread>,
-  localThreads: ReadonlyArray<DesktopLocalThreadSummary>,
   query: string
 ): Array<PaletteResult> {
   const normalizedQuery = query.trim().toLowerCase()
@@ -84,18 +73,7 @@ export function buildPaletteResults(
       label: thread.title,
       thread,
     }))
-  const localResults: Array<LocalThreadResult> = localThreads
-    .filter(
-      (thread) =>
-        !normalizedQuery || thread.title.toLowerCase().includes(normalizedQuery)
-    )
-    .map((thread) => ({
-      id: `local:${thread.id}`,
-      kind: "local-thread",
-      label: thread.title,
-      thread,
-    }))
-  return [...commandResults, ...cloudResults, ...localResults]
+  return [...commandResults, ...cloudResults]
 }
 
 export function AppCommandPalette({
@@ -111,9 +89,6 @@ export function AppCommandPalette({
   const [query, setQuery] = useState("")
   const [debouncedQuery, setDebouncedQuery] = useState("")
   const [activeHighlight, setActiveHighlight] = useState({ key: "", index: 0 })
-  const isDesktop =
-    typeof window !== "undefined" && Boolean(window.openSweDesktop)
-
   useEffect(() => {
     if (!open) {
       // oxlint-disable-next-line react/set-state-in-effect
@@ -133,16 +108,14 @@ export function AppCommandPalette({
     },
     { enabled: open, staleWhileRevalidate: true }
   )
-  const localThreads = useDesktopLocalThreads({ enabled: open && isDesktop })
   const results = useMemo(
     () =>
       buildPaletteResults(
         commands,
         cloudThreads.data?.pages.flatMap((page) => page.items) ?? [],
-        localThreads.data ?? [],
         query
       ),
-    [cloudThreads.data?.pages, commands, localThreads.data, query]
+    [cloudThreads.data?.pages, commands, query]
   )
   const resultGroups = useMemo(() => {
     const grouped = new Map<string, Array<PaletteResult>>()
@@ -150,9 +123,7 @@ export function AppCommandPalette({
       const group =
         result.kind === "command"
           ? result.command.group
-          : result.kind === "cloud-thread"
-            ? "Cloud threads"
-            : "This Mac"
+          : "Cloud threads"
       grouped.set(group, [...(grouped.get(group) ?? []), result])
     }
     return [...grouped]
@@ -177,11 +148,6 @@ export function AppCommandPalette({
       void navigate({
         to: "/agents/$threadId",
         params: { threadId: result.thread.id },
-      })
-    } else {
-      void navigate({
-        to: "/agents/local/$sessionId",
-        params: { sessionId: result.thread.id },
       })
     }
   }
@@ -226,7 +192,7 @@ export function AppCommandPalette({
             Search commands and threads
           </Dialog.Title>
           <Dialog.Description className="sr-only">
-            Search commands, cloud threads, and local desktop threads.
+            Search commands and threads.
           </Dialog.Description>
           <div className="flex items-center gap-2 border-b border-border px-4">
             <Search className="size-4 shrink-0 text-muted-foreground" />
@@ -274,11 +240,7 @@ export function AppCommandPalette({
                       const command =
                         result.kind === "command" ? result.command : null
                       const Icon =
-                        result.kind === "command"
-                          ? CommandIcon
-                          : result.kind === "local-thread"
-                            ? Laptop
-                            : MessageSquare
+                        result.kind === "command" ? CommandIcon : MessageSquare
                       return (
                         <button
                           aria-selected={index === activeIndex}

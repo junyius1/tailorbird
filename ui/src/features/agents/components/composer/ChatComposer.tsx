@@ -21,11 +21,6 @@ import { ContextWindowMeter } from "./ContextWindowMeter"
 import { EnvironmentSelector } from "./EnvironmentSelector"
 import { SandboxSelector, type SandboxType } from "./SandboxSelector"
 import {
-  LocalBranchSelector,
-  LocalProjectSelector,
-  RunTargetSelector,
-} from "./RunTargetSelector"
-import {
   COMPOSER_PATH_DRAG_MIME,
   detectComposerTrigger,
   replaceTextRange,
@@ -37,8 +32,6 @@ import type {
   ComposerPromptEditorHandle,
 } from "./ComposerPromptEditor"
 import type { ComposerSlashCommand, ComposerTrigger } from "./composerTrigger"
-import type { RunTarget } from "./RunTargetSelector"
-import type { DesktopProject } from "@/desktop"
 import type { EnvironmentOption, ModelOption, Skill } from "@/lib/api"
 import type { ImageChunk } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
@@ -108,19 +101,6 @@ export interface ChatComposerProps {
   onAddPath?: (path: string) => Promise<string | null>
   /** 提供后路径仓库行出现删除按钮;返回错误文案或 null(成功)。 */
   onDeletePath?: (fullName: string) => Promise<string | null>
-  /** Desktop-only execution target. Omit this prop to keep the control out of the web UI. */
-  runTarget?: RunTarget
-  onRunTargetChange?: (next: RunTarget) => void
-  localProjects?: Array<DesktopProject>
-  selectedLocalProjectPath?: string | null
-  selectedLocalProjectBranch?: string | null
-  localProjectBranches?: Array<string>
-  onSelectLocalProject?: (cwd: string) => void
-  onAddLocalProject?: () => void
-  onRemoveLocalProject?: (cwd: string) => void
-  onRefreshLocalProjectBranch?: () => void
-  onSelectLocalProjectBranch?: (branch: string) => void
-  onCreateLocalProjectBranch?: (branch: string) => void
   /** When provided, a Plan mode toggle is shown. Plan mode researches read-only and proposes a plan before editing. */
   planMode?: boolean
   onPlanModeChange?: (next: boolean) => void
@@ -237,18 +217,6 @@ export const ChatComposer = memo(function ChatComposer({
   onRepoChange,
   onAddPath,
   onDeletePath,
-  runTarget,
-  onRunTargetChange,
-  localProjects = [],
-  selectedLocalProjectPath = null,
-  selectedLocalProjectBranch = null,
-  localProjectBranches = [],
-  onSelectLocalProject,
-  onAddLocalProject,
-  onRemoveLocalProject,
-  onRefreshLocalProjectBranch,
-  onSelectLocalProjectBranch,
-  onCreateLocalProjectBranch,
   planMode = false,
   onPlanModeChange,
   adminThread = false,
@@ -673,12 +641,9 @@ export const ChatComposer = memo(function ChatComposer({
         compact ? "max-w-none" : "max-w-2xl"
       )}
     >
-      {(onRepoChange || onRunTargetChange || onEnvironmentChange || onSandboxTypeChange) && (
+      {(onRepoChange || onEnvironmentChange || onSandboxTypeChange) && (
         <div className="mb-2 flex min-w-0 flex-wrap items-center gap-2 px-1 text-xs">
-          {runTarget && onRunTargetChange && (
-            <RunTargetSelector onChange={onRunTargetChange} value={runTarget} />
-          )}
-          {runTarget !== "local" && onRepoChange && (
+          {onRepoChange && (
             <RepoSelector
               repos={repos}
               selectedRepo={selectedRepo}
@@ -687,44 +652,19 @@ export const ChatComposer = memo(function ChatComposer({
               onDeletePath={onDeletePath}
             />
           )}
-          {runTarget !== "local" && onEnvironmentChange && (
+          {onEnvironmentChange && (
             <EnvironmentSelector
               environments={environments}
               selectedSlug={selectedEnvironment}
               onChange={onEnvironmentChange}
             />
           )}
-          {runTarget !== "local" && onSandboxTypeChange && (
+          {onSandboxTypeChange && (
             <SandboxSelector
               value={sandboxType}
               onChange={onSandboxTypeChange}
             />
           )}
-          {runTarget === "local" &&
-            onSelectLocalProject &&
-            onAddLocalProject &&
-            onRemoveLocalProject && (
-              <LocalProjectSelector
-                onAddProject={onAddLocalProject}
-                onRemoveProject={onRemoveLocalProject}
-                onSelectProject={onSelectLocalProject}
-                projects={localProjects}
-                selectedProjectPath={selectedLocalProjectPath}
-              />
-            )}
-          {runTarget === "local" &&
-            onRefreshLocalProjectBranch &&
-            onSelectLocalProjectBranch &&
-            onCreateLocalProjectBranch && (
-              <LocalBranchSelector
-                branches={localProjectBranches}
-                disabled={!selectedLocalProjectPath}
-                onCreateBranch={onCreateLocalProjectBranch}
-                onRefresh={onRefreshLocalProjectBranch}
-                onSelectBranch={onSelectLocalProjectBranch}
-                selectedBranch={selectedLocalProjectBranch}
-              />
-            )}
         </div>
       )}
 

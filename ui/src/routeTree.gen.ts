@@ -19,7 +19,6 @@ import { Route as AgentsReviewsRouteImport } from './routes/agents/reviews'
 import { Route as AgentsSkillsRouteImport } from './routes/agents/skills'
 import { Route as AgentsThreadsRouteImport } from './routes/agents/threads'
 import { Route as AgentsAutomationsIndexRouteImport } from './routes/agents/automations/index'
-import { Route as AgentsLocalSessionIdRouteImport } from './routes/agents/local/$sessionId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -71,11 +70,6 @@ const AgentsAutomationsIndexRoute = AgentsAutomationsIndexRouteImport.update({
   path: '/automations/',
   getParentRoute: () => AgentsRoute,
 } as any)
-const AgentsLocalSessionIdRoute = AgentsLocalSessionIdRouteImport.update({
-  id: '/local/$sessionId',
-  path: '/local/$sessionId',
-  getParentRoute: () => AgentsRoute,
-} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -87,7 +81,6 @@ export interface FileRoutesByFullPath {
   '/agents/skills': typeof AgentsSkillsRoute
   '/agents/threads': typeof AgentsThreadsRoute
   '/agents/': typeof AgentsIndexRoute
-  '/agents/local/$sessionId': typeof AgentsLocalSessionIdRoute
   '/agents/automations/': typeof AgentsAutomationsIndexRoute
 }
 export interface FileRoutesByTo {
@@ -99,7 +92,6 @@ export interface FileRoutesByTo {
   '/agents/skills': typeof AgentsSkillsRoute
   '/agents/threads': typeof AgentsThreadsRoute
   '/agents': typeof AgentsIndexRoute
-  '/agents/local/$sessionId': typeof AgentsLocalSessionIdRoute
   '/agents/automations': typeof AgentsAutomationsIndexRoute
 }
 export interface FileRoutesById {
@@ -113,7 +105,6 @@ export interface FileRoutesById {
   '/agents/skills': typeof AgentsSkillsRoute
   '/agents/threads': typeof AgentsThreadsRoute
   '/agents/': typeof AgentsIndexRoute
-  '/agents/local/$sessionId': typeof AgentsLocalSessionIdRoute
   '/agents/automations/': typeof AgentsAutomationsIndexRoute
 }
 export interface FileRouteTypes {
@@ -128,7 +119,6 @@ export interface FileRouteTypes {
     | '/agents/skills'
     | '/agents/threads'
     | '/agents/'
-    | '/agents/local/$sessionId'
     | '/agents/automations/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -140,7 +130,6 @@ export interface FileRouteTypes {
     | '/agents/skills'
     | '/agents/threads'
     | '/agents'
-    | '/agents/local/$sessionId'
     | '/agents/automations'
   id:
     | '__root__'
@@ -153,7 +142,6 @@ export interface FileRouteTypes {
     | '/agents/skills'
     | '/agents/threads'
     | '/agents/'
-    | '/agents/local/$sessionId'
     | '/agents/automations/'
   fileRoutesById: FileRoutesById
 }
@@ -236,13 +224,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsAutomationsIndexRouteImport
       parentRoute: typeof AgentsRoute
     }
-    '/agents/local/$sessionId': {
-      id: '/agents/local/$sessionId'
-      path: '/local/$sessionId'
-      fullPath: '/agents/local/$sessionId'
-      preLoaderRoute: typeof AgentsLocalSessionIdRouteImport
-      parentRoute: typeof AgentsRoute
-    }
   }
 }
 
@@ -252,7 +233,6 @@ interface AgentsRouteChildren {
   AgentsSkillsRoute: typeof AgentsSkillsRoute
   AgentsThreadsRoute: typeof AgentsThreadsRoute
   AgentsIndexRoute: typeof AgentsIndexRoute
-  AgentsLocalSessionIdRoute: typeof AgentsLocalSessionIdRoute
   AgentsAutomationsIndexRoute: typeof AgentsAutomationsIndexRoute
 }
 
@@ -262,7 +242,6 @@ const AgentsRouteChildren: AgentsRouteChildren = {
   AgentsSkillsRoute: AgentsSkillsRoute,
   AgentsThreadsRoute: AgentsThreadsRoute,
   AgentsIndexRoute: AgentsIndexRoute,
-  AgentsLocalSessionIdRoute: AgentsLocalSessionIdRoute,
   AgentsAutomationsIndexRoute: AgentsAutomationsIndexRoute,
 }
 
