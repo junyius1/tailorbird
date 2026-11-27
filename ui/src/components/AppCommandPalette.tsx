@@ -123,9 +123,7 @@ export function AppCommandPalette({
       const group =
         result.kind === "command"
           ? result.command.group
-          : result.kind === "cloud-thread"
-            ? "Cloud threads"
-            : "This Mac"
+          : "Cloud threads"
       grouped.set(group, [...(grouped.get(group) ?? []), result])
     }
     return [...grouped]
@@ -194,7 +192,7 @@ export function AppCommandPalette({
             Search commands and threads
           </Dialog.Title>
           <Dialog.Description className="sr-only">
-            Search commands, cloud threads, and local desktop threads.
+            Search commands and threads.
           </Dialog.Description>
           <div className="flex items-center gap-2 border-b border-border px-4">
             <Search className="size-4 shrink-0 text-muted-foreground" />
